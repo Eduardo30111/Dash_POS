@@ -9,7 +9,7 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 ruta_db = os.path.join(base_dir, '..', 'database', 'ventas.db')
 
 # Asegurar que el directorio de la base de datos existe
-os.makedirs(os.path.join(base_dir, 'database'), exist_ok=True)
+os.makedirs(os.path.dirname(ruta_db), exist_ok=True)
 
 # --- Constantes y Funciones de Utilidad ---
 
@@ -89,8 +89,14 @@ def insertar_usuario(usuario, contrasena, rol, estado):
             conn.commit()
             print(f"Usuario '{usuario}' insertado con ID {usuario_id}.")
 
-            # Inicializar permisos para el nuevo usuario
-            inicializar_permisos_usuario(usuario_id)
+            # Inicializar permisos para el nuevo usuario según su rol
+            if rol == "Administrador":
+                inicializar_permisos_administrador(usuario_id)
+            elif rol == "Vendedor":
+                inicializar_permisos_vendedor(usuario_id)
+            else:
+                inicializar_permisos_usuario(usuario_id)
+            
             return True
         except sqlite3.IntegrityError:
             print(f"Error: El usuario '{usuario}' ya existe.")
@@ -116,9 +122,9 @@ def obtener_usuarios():
             conn.close()
     return usuarios
 
-def verificar_credenciales(usuario, contrasena_ingresada):
+def obtener_usuario_por_credenciales(usuario, contrasena_ingresada):
     """
-    Verifica las credenciales de un usuario.
+    Función principal para verificar credenciales en el login.
     Retorna los datos del usuario si las credenciales son correctas,
     de lo contrario retorna None.
     """
@@ -126,23 +132,36 @@ def verificar_credenciales(usuario, contrasena_ingresada):
     if conn:
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT * FROM usuarios WHERE usuario = ?", (usuario,))
+            cursor.execute("SELECT * FROM usuarios WHERE usuario = ? AND estado = 'Activo'", (usuario,))
             usuario_db = cursor.fetchone()
 
             if usuario_db:
-                # Comprobar primero con la contraseña hasheada
+                # Verificar contraseña hasheada
                 contrasena_hasheada_ingresada = hash_password(contrasena_ingresada)
                 if contrasena_hasheada_ingresada == usuario_db['contrasena']:
-                    return dict(usuario_db) # Login exitoso con contraseña hasheada
-                
-                # Solución temporal: comprobar con contraseña de texto plano
-                if contrasena_ingresada == usuario_db['contrasena']:
-                    return dict(usuario_db) # Login exitoso con contraseña en texto plano
+                    # Actualizar último acceso
+                    actualizar_ultimo_acceso(usuario_db['id'])
+                    return dict(usuario_db)
 
-            return None # Credenciales incorrectas
+            return None # Credenciales incorrectas o usuario inactivo
         except sqlite3.Error as e:
             print(f"Error al verificar credenciales: {e}")
             return None
+        finally:
+            conn.close()
+
+def actualizar_ultimo_acceso(usuario_id):
+    """Actualiza la fecha y hora del último acceso del usuario."""
+    conn = obtener_conexion()
+    if conn:
+        cursor = conn.cursor()
+        try:
+            ultimo_acceso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("UPDATE usuarios SET ultimo_acceso = ? WHERE id = ?", 
+                           (ultimo_acceso, usuario_id))
+            conn.commit()
+        except sqlite3.Error as e:
+            print(f"Error al actualizar último acceso: {e}")
         finally:
             conn.close()
 
@@ -163,22 +182,70 @@ def obtener_permisos_por_usuario(usuario_id):
         finally:
             conn.close()
 
-def inicializar_permisos_usuario(usuario_id):
-    """Inicializa los permisos de un nuevo usuario con acceso total a todos los módulos."""
+def inicializar_permisos_administrador(usuario_id):
+    """Inicializa los permisos de un administrador con acceso total a todos los módulos."""
     conn = obtener_conexion()
     if conn:
         cursor = conn.cursor()
         try:
             for modulo in MODULOS_DISPONIBLES:
                 cursor.execute(
-                    "INSERT INTO permisos (usuario_id, modulo, permiso) VALUES (?, ?, ?)",
+                    "INSERT OR REPLACE INTO permisos (usuario_id, modulo, permiso) VALUES (?, ?, ?)",
                     (usuario_id, modulo, 1) # 1 = Acceso Total
                 )
             conn.commit()
-            print(f"Permisos iniciales creados para el usuario ID {usuario_id}.")
+            print(f"Permisos de administrador creados para el usuario ID {usuario_id}.")
             return True
         except sqlite3.Error as e:
-            print(f"Error al inicializar permisos: {e}")
+            print(f"Error al inicializar permisos de administrador: {e}")
+            return False
+        finally:
+            conn.close()
+
+def inicializar_permisos_vendedor(usuario_id):
+    """Inicializa los permisos de un vendedor con acceso limitado."""
+    conn = obtener_conexion()
+    if conn:
+        cursor = conn.cursor()
+        try:
+            # Módulos permitidos para vendedor
+            modulos_vendedor = ["Ventas", "Inventario", "Clientes", "Reportes"]
+            
+            for modulo in MODULOS_DISPONIBLES:
+                if modulo in modulos_vendedor:
+                    permiso = 1  # Acceso Total
+                else:
+                    permiso = 0  # Sin Acceso
+                
+                cursor.execute(
+                    "INSERT OR REPLACE INTO permisos (usuario_id, modulo, permiso) VALUES (?, ?, ?)",
+                    (usuario_id, modulo, permiso)
+                )
+            conn.commit()
+            print(f"Permisos de vendedor creados para el usuario ID {usuario_id}.")
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al inicializar permisos de vendedor: {e}")
+            return False
+        finally:
+            conn.close()
+
+def inicializar_permisos_usuario(usuario_id):
+    """Inicializa los permisos de un usuario básico con acceso limitado."""
+    conn = obtener_conexion()
+    if conn:
+        cursor = conn.cursor()
+        try:
+            for modulo in MODULOS_DISPONIBLES:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO permisos (usuario_id, modulo, permiso) VALUES (?, ?, ?)",
+                    (usuario_id, modulo, 0) # 0 = Sin Acceso por defecto
+                )
+            conn.commit()
+            print(f"Permisos básicos creados para el usuario ID {usuario_id}.")
+            return True
+        except sqlite3.Error as e:
+            print(f"Error al inicializar permisos básicos: {e}")
             return False
         finally:
             conn.close()
@@ -219,5 +286,33 @@ def eliminar_usuario_db(usuario_id):
         finally:
             conn.close()
 
-# Llamar a la función para crear las tablas al importar el módulo
-crear_tablas_iniciales()
+def crear_usuarios_iniciales():
+    """Crea los usuarios iniciales del sistema si no existen."""
+    usuarios_iniciales = [
+        ("eduardo", "2121", "Administrador", "Activo"),
+        ("andres", "2180", "Vendedor", "Activo")
+    ]
+    
+    for usuario, contrasena, rol, estado in usuarios_iniciales:
+        # Verificar si el usuario ya existe
+        conn = obtener_conexion()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT id FROM usuarios WHERE usuario = ?", (usuario,))
+                if not cursor.fetchone():
+                    # El usuario no existe, crearlo
+                    insertar_usuario(usuario, contrasena, rol, estado)
+                    print(f"Usuario inicial '{usuario}' creado exitosamente.")
+                else:
+                    print(f"Usuario '{usuario}' ya existe en la base de datos.")
+            except sqlite3.Error as e:
+                print(f"Error al verificar usuario existente: {e}")
+            finally:
+                conn.close()
+
+# Esto asegura que las funciones de inicialización solo se ejecuten
+# cuando el archivo se corre directamente.
+if __name__ == "__main__":
+    crear_tablas_iniciales()
+    crear_usuarios_iniciales()

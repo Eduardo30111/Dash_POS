@@ -12,7 +12,8 @@ from usuarios_db import (
     crear_tablas_iniciales, insertar_usuario, obtener_usuarios,
     actualizar_usuario_db, eliminar_usuario_db,
     obtener_permisos_por_usuario, MODULOS_DISPONIBLES, hash_password,
-    verificar_credenciales
+    # FIX: Se corrige el nombre de la función de verificación de credenciales
+    obtener_usuario_por_credenciales
 )
 
 # 🌐 Variables globales para los widgets de la interfaz
@@ -174,7 +175,8 @@ def probar_login():
         messagebox.showerror("Error", "Por favor, introduce un usuario y una contraseña.")
         return
         
-    usuario_verificado = verificar_credenciales(usuario, contrasena)
+    # FIX: Se cambia la llamada a la función para usar el nombre correcto
+    usuario_verificado = obtener_usuario_por_credenciales(usuario, contrasena)
 
     if usuario_verificado:
         messagebox.showinfo("Login Exitoso", f"Bienvenido, {usuario_verificado['usuario']}!")
@@ -286,7 +288,7 @@ def iniciar_usuarios():
 
     # Tabla de usuarios
     tabla_frame = tk.LabelFrame(main_frame, text="📋 Lista de Usuarios", font=("Segoe UI", 12, "bold"),
-                                bg="#FFE4F1", fg="#C71585", padx=10, pady=10, relief="flat")
+                                 bg="#FFE4F1", fg="#C71585", padx=10, pady=10, relief="flat")
     tabla_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     columnas = ("ID", "Usuario", "Rol", "Estado", "Último Acceso", "Registro")
