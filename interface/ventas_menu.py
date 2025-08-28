@@ -1,5 +1,5 @@
 # ====================================================================================
-#   IMPORTS Y CONFIGURACIÓN INICIAL
+#   IMPORTS Y CONFIGURACIÓN INICIAL
 # ====================================================================================
 
 import tkinter as tk
@@ -13,6 +13,7 @@ import os
 # pip install escpos-python
 try:
     from escpos.printer import Usb
+    IMPRESION_DISPONIBLE = True
 except ImportError:
     # Este bloque maneja el caso en que la biblioteca no está instalada,
     # permitiendo que la aplicación se ejecute sin la funcionalidad de impresión.
@@ -27,9 +28,10 @@ except ImportError:
             pass
         def cut(self):
             pass
+    IMPRESION_DISPONIBLE = False
 
 # ====================================================================================
-#   CLASE PRINCIPAL DE LA APLICACIÓN
+#   CLASE PRINCIPAL DE LA APLICACIÓN
 # ====================================================================================
 
 class App:
@@ -195,7 +197,7 @@ class App:
         btn_nueva_venta.pack(pady=10)
 
     # ====================================================================================
-    #   FUNCIONES DE CONEXIÓN Y UTILIDADES
+    #   FUNCIONES DE CONEXIÓN Y UTILIDADES
     # ====================================================================================
     
     def obtener_productos(self):
@@ -205,13 +207,20 @@ class App:
         # La ruta a la base de datos se mantiene igual
         base_dir = os.path.dirname(__file__)
         ruta_db = os.path.join(base_dir, '..', 'database', 'ventas.db')
+        
+        # Debug: Verificar la ruta de la base de datos
+        print(f"DEBUG: Intentando conectar a la base de datos en: {ruta_db}")
+        print(f"DEBUG: La base de datos existe: {os.path.exists(ruta_db)}")
+        
         try:
             with sqlite3.connect(ruta_db) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT codigo, nombre, stock, precio FROM productos")
                 productos = cursor.fetchall()
+                print(f"DEBUG: Se encontraron {len(productos)} productos en la base de datos")
                 return productos
         except Exception as e:
+            print(f"ERROR: {e}")
             messagebox.showerror("Error de conexión", f"No se pudo abrir la base de datos:\n{e}")
             return []
 
@@ -255,6 +264,7 @@ class App:
                 conn.commit()
                 return id_venta
         except Exception as e:
+            print(f"ERROR al guardar venta: {e}")
             messagebox.showerror("Error de base de datos", f"No se pudo guardar la venta:\n{e}")
             return None
 
@@ -270,71 +280,119 @@ class App:
                 cursor = conn.cursor()
                 
                 for codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal in productos_vendidos:
-                    # Insertar en la tabla 'detalle_ventas'
+                    print(f"DEBUG: Procesando producto - Código: {codigo_producto}, Cantidad: {cantidad}")
+                    
+                    # Insertar en la tabla 'detalle_ventas' - CORREGIDO: Removido el parámetro extra
                     cursor.execute(
-                        "INSERT INTO detalle_ventas (id_venta, codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal, codigo) VALUES (?, ?, ?, ?, ?, ?)", 
+                        "INSERT INTO detalle_ventas (id_venta, codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal) VALUES (?, ?, ?, ?, ?, ?)", 
                         (id_venta, codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal)
                     )
                     
                     # Actualizar el stock del producto de forma flexible
-                    cursor.execute("UPDATE productos SET stock = stock - ? WHERE codigo = ?", (cantidad, codigo_producto))
-                    rows_updated = cursor.rowcount
-
-                    if rows_updated == 0:
-                        codigo_formateado = codigo_producto.zfill(5)
-                        cursor.execute("UPDATE productos SET stock = stock - ? WHERE codigo = ?", (cantidad, codigo_formateado))
-                        rows_updated = cursor.rowcount
+                    # Primero intentar con el código tal como está
+                    cursor.execute("SELECT stock FROM productos WHERE codigo = ?", (codigo_producto,))
+                    resultado = cursor.fetchone()
                     
-                    if rows_updated == 0:
-                        print(f"ADVERTENCIA: No se encontró ningún producto con el código '{codigo_producto}' para actualizar.")
+                    if resultado:
+                        stock_actual = resultado[0]
+                        nuevo_stock = stock_actual - cantidad
+                        cursor.execute("UPDATE productos SET stock = ? WHERE codigo = ?", (nuevo_stock, codigo_producto))
+                        print(f"DEBUG: Stock actualizado para código {codigo_producto}: {stock_actual} -> {nuevo_stock}")
+                    else:
+                        # Intentar con código formateado con ceros
+                        codigo_formateado = str(codigo_producto).zfill(5)
+                        cursor.execute("SELECT stock FROM productos WHERE codigo = ?", (codigo_formateado,))
+                        resultado = cursor.fetchone()
+                        
+                        if resultado:
+                            stock_actual = resultado[0]
+                            nuevo_stock = stock_actual - cantidad
+                            cursor.execute("UPDATE productos SET stock = ? WHERE codigo = ?", (nuevo_stock, codigo_formateado))
+                            print(f"DEBUG: Stock actualizado para código formateado {codigo_formateado}: {stock_actual} -> {nuevo_stock}")
+                        else:
+                            print(f"ADVERTENCIA: No se encontró ningún producto con el código '{codigo_producto}' para actualizar el stock.")
 
                 conn.commit()
+                print("DEBUG: Todos los detalles de venta guardados y stock actualizado correctamente")
                 return True
         except Exception as e:
+            print(f"ERROR al guardar detalle de ventas: {e}")
             messagebox.showerror("Error de base de datos", f"No se pudo guardar el detalle de la venta:\n{e}")
             return False
-        
-    def actualizar_stock_db(productos_vendidos):
-        ruta_db = os.path.join(base_dir, '..', 'database', 'ventas.db')
-        with sqlite3.connect(ruta_db) as conexion:
-            cursor=conexion.cursor()
-            for producto in productos_vendidos:
-                codigo = producto ['codigo']
-                cantidad_vendida = producto ['cantidad']
-
-                #obtener stock actual📌
-                cursor.execute("SELECT stock FROM productos")
-                resultado=cursor.fetchone()
-                if resultado:
-                   stock_actual = resultado[0]
-                   nuevo_stock = stock_actual - cantidad_vendida
-
-                   #actualizar stock
-                   cursor.execute("UPDATE productos SET stock = ? WHERE codigo = ?", (nuevo_stock, codigo))
-        
 
     def imprimir_factura_termica(self, documento_cliente, usuario, productos, total_general, factura_num, fecha, hora):
         """
         Imprime una factura en una impresora térmica compatible.
         """
+        if not IMPRESION_DISPONIBLE:
+            messagebox.showwarning("Impresión no disponible", "La biblioteca de impresión no está instalada.")
+            return
+            
         try:
-            # IDs de impresoras comunes para probar la conexión
+            # IDs de impresoras DigitalPOS y otras marcas comunes
             ids_impresoras = [
-                (0x0fe6, 0x811e), (0x04b8, 0x0202), (0x04b8, 0x0e15),
-                (0x154f, 0x154f), (0x1fc9, 0x2016), (0x0483, 0x5743)
+                # DigitalPOS - Impresoras más comunes
+                (0x0fe6, 0x811e),  # DigitalPOS DRP-085
+                (0x0fe6, 0x811f),  # DigitalPOS DRP-085II
+                (0x0fe6, 0x811d),  # DigitalPOS DRP-058
+                (0x0fe6, 0x811c),  # DigitalPOS DRP-080
+                (0x0fe6, 0x811b),  # DigitalPOS DRP-080II
+                (0x0fe6, 0x811a),  # DigitalPOS Variante 1
+                (0x0fe6, 0x8119),  # DigitalPOS Variante 2
+                (0x0fe6, 0x8118),  # DigitalPOS Variante 3
+                (0x0fe6, 0x8117),  # DigitalPOS Variante 4
+                (0x0fe6, 0x8116),  # DigitalPOS Variante 5
+                (0x0fe6, 0x8115),  # DigitalPOS DRP-085 v2
+                (0x0fe6, 0x8114),  # DigitalPOS DRP-058 v2
+                (0x0fe6, 0x8113),  # DigitalPOS DRP-080 v2
+                
+                # Otras marcas comunes en Colombia
+                (0x04b8, 0x0202),  # Epson TM-T88
+                (0x04b8, 0x0e15),  # Epson TM-T20
+                (0x04b8, 0x0e03),  # Epson TM-T88IV
+                (0x04b8, 0x0e07),  # Epson TM-T88V
+                (0x154f, 0x154f),  # Wincor Nixdorf
+                (0x1fc9, 0x2016),  # Solidtek
+                (0x0483, 0x5743),  # STMicroelectronics
+                (0x2d17, 0x0001),  # Innovate
+                (0x2d17, 0x0002),  # Innovate v2
+                (0x1a86, 0x7523),  # QinHeng Electronics
+                (0x1a86, 0x7584),  # QinHeng CH341
+                (0x0416, 0x5011),  # Winbond Electronics
+                (0x067b, 0x2305),  # Prolific
+                (0x10c4, 0xea60),  # Silicon Labs CP210x
+                
+                # Bixolon (marca común en POS)
+                (0x1504, 0x0006),  # Bixolon SRP-350
+                (0x1504, 0x0007),  # Bixolon SRP-275
+                (0x1504, 0x0008),  # Bixolon SRP-350II
+                
+                # Star Micronics
+                (0x0519, 0x0001),  # Star TSP100
+                (0x0519, 0x0002),  # Star TSP650
+                (0x0519, 0x0003),  # Star TSP700
+                
+                # Citizen
+                (0x1d90, 0x2168),  # Citizen CT-S310
+                (0x1d90, 0x2169),  # Citizen CT-S2000
             ]
 
             p = None
+            impresora_encontrada = None
+            
             for vendor_id, product_id in ids_impresoras:
                 try:
                     p = Usb(vendor_id, product_id)
+                    impresora_encontrada = f"{vendor_id:04x}:{product_id:04x}"
+                    print(f"DEBUG: Impresora encontrada: {impresora_encontrada}")
                     break
-                except:
+                except Exception as e:
                     continue
 
             if p is None:
-                raise Exception("No se encontró ninguna impresora compatible conectada")
+                raise Exception("No se encontró ninguna impresora térmica compatible conectada")
 
+            # Configuración e impresión de la factura
             p.set(align='center', bold=True, double_width=False, double_height=False)
             p.text("VARIEDADES MARCE\n")
             p.set(align='center', bold=False)
@@ -350,7 +408,7 @@ class App:
             p.text(f"Vendedora: {usuario}\n")
             p.text("-" * 32 + "\n")
 
-            p.text("Producto           Cant  Precio\n")
+            p.text("Producto           Cant  Precio\n")
             p.text("-" * 32 + "\n")
 
             total_items = 0
@@ -360,7 +418,7 @@ class App:
                 nombre_corto = nombre[:15].ljust(15)
                 # Formato para la impresión de la línea de cada producto
                 p.text(f"{nombre_corto} {cantidad:>2}x ${precio:>6,.0f}\n")
-                p.text(f"      Subtotal: ${subtotal:>8,.0f}\n")
+                p.text(f"      Subtotal: ${subtotal:>8,.0f}\n")
 
             p.text("-" * 32 + "\n")
             p.text(f"Total Items: {total_items}\n")
@@ -375,7 +433,7 @@ class App:
             p.text("\n\n")
             p.cut()
 
-            messagebox.showinfo("✅ Impresión", "¡Factura impresa exitosamente! 💖")
+            messagebox.showinfo("✅ Impresión", f"¡Factura impresa exitosamente en impresora {impresora_encontrada}! 💖")
 
         except Exception as e:
             self.mostrar_error_impresion(e)
@@ -387,14 +445,14 @@ class App:
         """
         ventana_error = tk.Toplevel(self.ventana)
         ventana_error.title("❌ Error de impresión")
-        ventana_error.geometry("500x250")
+        ventana_error.geometry("500x350")
         ventana_error.configure(bg="#FFB6C1")
         ventana_error.grab_set()
 
         ventana_error.update_idletasks()
         x = (self.ventana.winfo_screenwidth() // 2) - (250)
-        y = (self.ventana.winfo_screenheight() // 2) - (125)
-        ventana_error.geometry(f"500x250+{x}+{y}")
+        y = (self.ventana.winfo_screenheight() // 2) - (175)
+        ventana_error.geometry(f"500x350+{x}+{y}")
 
         tk.Label(ventana_error, text="❌ ERROR DE IMPRESIÓN",
                  font=("Arial", 14, "bold"), bg="#FFB6C1", fg="#8B0054").pack(pady=10)
@@ -411,8 +469,10 @@ class App:
 
         soluciones = """• Verifica que la impresora esté conectada y encendida
 • Instala el driver de la impresora DigitalPOS
-• Revisa el cable USB
-• Reinicia la impresora"""
+• Revisa el cable USB y prueba otro puerto
+• Reinicia la impresora y la aplicación
+• Verifica que la impresora esté configurada como predeterminada
+• Para DigitalPOS: instala el software oficial del fabricante"""
 
         tk.Label(ventana_error, text=soluciones,
                  font=("Arial", 9), bg="#FFB6C1", fg="#8B0054", justify="left").pack(pady=5)
@@ -429,7 +489,7 @@ class App:
         ventana_error.bind('<Escape>', lambda event: cerrar_error())
 
     # ====================================================================================
-    #   FUNCIONES DE LA INTERFAZ DE USUARIO
+    #   FUNCIONES DE LA INTERFAZ DE USUARIO
     # ====================================================================================
 
     def actualizar_total(self):
@@ -492,7 +552,14 @@ class App:
             valores = lista.item(seleccionado)["values"]
             codigo = valores[0]
             nombre = valores[1]
+            stock = int(valores[2])
             precio = self.limpiar_precio(valores[3])
+            
+            # Verificar stock disponible
+            if stock <= 0:
+                messagebox.showwarning("⚠️ Sin stock", f"El producto '{nombre}' no tiene stock disponible")
+                return
+                
             self.agregar_a_ticket(codigo, nombre, precio, 1)
             ventana_busqueda.destroy()
 
@@ -512,18 +579,37 @@ class App:
         Agrega un producto al Treeview de la venta.
         Si el producto ya está en el carrito, actualiza la cantidad y el total.
         """
+        # Verificar stock disponible
+        stock_disponible = 0
+        for prod in self.productos_inventario:
+            if str(prod[0]) == str(codigo) or str(prod[0]).zfill(5) == str(codigo).zfill(5):
+                stock_disponible = prod[2]
+                break
+        
         # Buscar si el producto ya está en el carrito
         item_existente = None
+        cantidad_en_carrito = 0
+        
         for item in self.tabla.get_children():
             values = self.tabla.item(item)["values"]
             # El código del producto se guarda como el último valor en el Treeview
-            if values[-1] == codigo:
+            if len(values) >= 5 and str(values[4]) == str(codigo):
                 item_existente = item
+                cantidad_en_carrito = int(values[2])
                 break
+
+        # Verificar si hay suficiente stock
+        nueva_cantidad_total = cantidad_en_carrito + cantidad
+        if nueva_cantidad_total > stock_disponible:
+            messagebox.showwarning("⚠️ Stock insuficiente", 
+                                   f"Stock disponible: {stock_disponible}\n"
+                                   f"Cantidad en carrito: {cantidad_en_carrito}\n"
+                                   f"No se puede agregar {cantidad} unidades más")
+            return
 
         if item_existente:
             # Actualizar cantidad y total
-            nombre_actual, precio_actual_txt, cantidad_actual, total_actual_txt = self.tabla.item(item_existente)["values"]
+            nombre_actual, precio_actual_txt, cantidad_actual, total_actual_txt, codigo_actual = self.tabla.item(item_existente)["values"]
             nueva_cantidad = int(cantidad_actual) + cantidad
             nuevo_total = round(precio * nueva_cantidad, 2)
             self.tabla.item(item_existente, values=(nombre, self.formato_peso(precio), nueva_cantidad, self.formato_peso(nuevo_total), codigo))
@@ -556,6 +642,12 @@ class App:
                 break
 
         if producto_encontrado:
+            # Verificar stock
+            if producto_encontrado[2] <= 0:
+                messagebox.showwarning("⚠️ Sin stock", f"El producto '{producto_encontrado[1]}' no tiene stock disponible")
+                self.codigo_entrada.set("")
+                return
+                
             # prod[0]=codigo, prod[1]=nombre, prod[3]=precio
             self.agregar_a_ticket(str(producto_encontrado[0]), producto_encontrado[1], producto_encontrado[3], 1)
             self.codigo_entrada.set("")
@@ -585,10 +677,16 @@ class App:
         """
         if not self.documento.get().strip():
             messagebox.showerror("⚠️ Documento requerido", "Debes ingresar el número de documento del cliente.")
+            self.entry_doc.focus()
             return
         
         if self.total_general.get() <= 0:
             messagebox.showerror("⚠️ Sin productos", "Agrega productos antes de realizar el pago.")
+            return
+
+        # Verificar que hay productos en el carrito
+        if not self.tabla.get_children():
+            messagebox.showerror("⚠️ Sin productos", "No hay productos en el carrito.")
             return
 
         ventana_pago = tk.Toplevel(self.ventana)
@@ -596,6 +694,12 @@ class App:
         ventana_pago.geometry("400x300")
         ventana_pago.configure(bg="#FFB6C1")
         ventana_pago.grab_set()
+
+        # Centrar la ventana de pago
+        ventana_pago.update_idletasks()
+        x = (self.ventana.winfo_screenwidth() // 2) - (200)
+        y = (self.ventana.winfo_screenheight() // 2) - (150)
+        ventana_pago.geometry(f"400x300+{x}+{y}")
 
         tk.Label(ventana_pago, text="💖 PROCESAR PAGO 💖",
                  font=("Arial", 16, "bold"), bg="#FFB6C1", fg="#8B0054").pack(pady=15)
@@ -633,21 +737,28 @@ class App:
                 # Preparar los datos para el detalle y la impresión
                 productos_vendidos_db = []
                 productos_vendidos_print = []
+                
                 for item in self.tabla.get_children():
-                    nombre, precio_txt, cantidad, subtotal_txt, codigo = self.tabla.item(item)["values"]
-                    precio = self.limpiar_precio(precio_txt)
-                    subtotal = self.limpiar_precio(subtotal_txt)
-                    productos_vendidos_db.append((codigo, nombre, precio, int(cantidad), subtotal))
-                    productos_vendidos_print.append((nombre, precio, int(cantidad)))
+                    values = self.tabla.item(item)["values"]
+                    if len(values) >= 5:  # Asegurar que tenemos todos los valores
+                        nombre, precio_txt, cantidad, subtotal_txt, codigo = values
+                        precio = self.limpiar_precio(precio_txt)
+                        subtotal = self.limpiar_precio(subtotal_txt)
+                        productos_vendidos_db.append((codigo, nombre, precio, int(cantidad), subtotal))
+                        productos_vendidos_print.append((nombre, precio, int(cantidad)))
+                    else:
+                        print(f"ADVERTENCIA: Producto con valores incompletos: {values}")
 
                 # Guardar detalles y actualizar stock en la base de datos
                 if not self.guardar_detalle_ventas_db(id_venta, productos_vendidos_db):
                     messagebox.showerror("Error", "No se pudieron guardar los detalles de la venta.")
                     return
 
+                # Actualizar la lista de productos en memoria
+                self.productos_inventario = self.obtener_productos()
+
                 # Mostrar mensaje de venta completada con el vuelto
-                resultado = f"""
-💖 VENTA COMPLETADA 💖
+                resultado = f"""💖 VENTA COMPLETADA 💖
 
 🧾 Factura: {self.factura_num}
 📅 {datetime.now().strftime('%d-%m-%Y')} 🕒 {datetime.now().strftime('%H:%M:%S')}
@@ -657,8 +768,8 @@ class App:
 💵 Recibido: {self.formato_peso(recibido)}
 💰 Cambio: {self.formato_peso(vuelto)}
 
-🌸 ¡Gracias por tu compra! 🌸
-"""
+🌸 ¡Gracias por tu compra! 🌸"""
+                
                 messagebox.showinfo("✅ Pago Completado", resultado)
 
                 # Imprimir la factura
@@ -677,7 +788,12 @@ class App:
                 ventana_pago.destroy()
 
             except tk.TclError:
-                messagebox.showerror("❌ Error", "Ingresa un monto válido")
+                messagebox.showerror("❌ Error", "Ingresa un monto válido en números")
+            except ValueError:
+                messagebox.showerror("❌ Error", "Ingresa un monto válido en números")
+            except Exception as e:
+                print(f"ERROR en completar_venta: {e}")
+                messagebox.showerror("❌ Error", f"Error inesperado: {e}")
 
         entry_efectivo.bind('<Return>', lambda event: completar_venta())
 

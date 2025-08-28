@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -16,49 +17,136 @@ def formato_peso(valor):
 
 def limpiar_precio(texto):
     """Limpia una cadena de texto para extraer un valor numérico flotante."""
-    texto = texto.replace("$", "").replace("COP", "").replace(",", "").strip()
+    texto = str(texto).replace("$", "").replace("COP", "").replace(",", "").strip()
     try:
-        # Aquí se asume que las comas son separadores de miles
-        return float(texto.replace(",", ""))
+        return float(texto)
     except ValueError:
         return 0.0
 
-# 🧩 Funciones de base de datos
+# 🧩 Funciones de base de datos - CORREGIDAS
+def conectar_db():
+    """Establece conexión con la base de datos y crea las tablas si no existen"""
+    try:
+        conn = sqlite3.connect(ruta_db)
+        cursor = conn.cursor()
+        
+        # Crear tabla productos si no existe
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                codigo TEXT UNIQUE NOT NULL,
+                nombre TEXT NOT NULL,
+                precio REAL DEFAULT 0,
+                costo REAL DEFAULT 0,
+                stock INTEGER DEFAULT 0
+            )
+        """)
+        
+        # Crear tabla ventas si no existe
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ventas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_venta TEXT NOT NULL,
+                hora_venta TEXT NOT NULL,
+                documento_cliente TEXT,
+                total_venta REAL NOT NULL
+            )
+        """)
+        
+        # Crear tabla detalle_ventas si no existe
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS detalle_ventas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_venta INTEGER NOT NULL,
+                codigo_producto TEXT NOT NULL,
+                nombre_producto TEXT NOT NULL,
+                precio_unitario REAL NOT NULL,
+                cantidad INTEGER NOT NULL,
+                subtotal REAL NOT NULL,
+                FOREIGN KEY (id_venta) REFERENCES ventas (id)
+            )
+        """)
+        
+        conn.commit()
+        return conn
+    except Exception as e:
+        print(f"Error conectando a la base de datos: {e}")
+        messagebox.showerror("Error de DB", f"No se pudo conectar a la base de datos: {e}")
+        return None
+
 def guardar_producto(codigo, nombre, precio, costo, stock):
-    conn = sqlite3.connect(ruta_db)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO productos (codigo, nombre, precio, costo, stock)
-        VALUES (?, ?, ?, ?, ?)
-    """, (codigo, nombre, precio, costo, stock))
-    conn.commit()
-    conn.close()
+    """Guarda un nuevo producto en la base de datos"""
+    try:
+        conn = conectar_db()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO productos (codigo, nombre, precio, costo, stock)
+            VALUES (?, ?, ?, ?, ?)
+        """, (codigo, nombre, precio, costo, stock))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        messagebox.showerror("Error", f"El código '{codigo}' ya existe en el sistema.")
+        return False
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al guardar producto: {e}")
+        return False
 
 def actualizar_producto(id_producto, nombre, precio, costo, stock):
-    conn = sqlite3.connect(ruta_db)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE productos
-        SET nombre = ?, precio = ?, costo = ?, stock = ?
-        WHERE id = ?
-    """, (nombre, precio, costo, stock, id_producto))
-    conn.commit()
-    conn.close()
+    """Actualiza un producto existente"""
+    try:
+        conn = conectar_db()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE productos
+            SET nombre = ?, precio = ?, costo = ?, stock = ?
+            WHERE id = ?
+        """, (nombre, precio, costo, stock, id_producto))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al actualizar producto: {e}")
+        return False
 
 def eliminar_producto(id_producto):
-    conn = sqlite3.connect(ruta_db)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM productos WHERE id = ?", (id_producto,))
-    conn.commit()
-    conn.close()
+    """Elimina un producto de la base de datos"""
+    try:
+        conn = conectar_db()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM productos WHERE id = ?", (id_producto,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al eliminar producto: {e}")
+        return False
 
 def obtener_productos():
-    conn = sqlite3.connect(ruta_db)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, nombre, precio, costo, stock FROM productos")
-    productos = cursor.fetchall()
-    conn.close()
-    return productos
+    """Obtiene todos los productos de la base de datos"""
+    try:
+        conn = conectar_db()
+        if not conn:
+            return []
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, codigo, nombre, precio, costo, stock FROM productos")
+        productos = cursor.fetchall()
+        conn.close()
+        return productos
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al obtener productos: {e}")
+        return []
 
 # 🖥️ Interfaz principal
 def iniciar_inventario():
@@ -67,6 +155,14 @@ def iniciar_inventario():
     ventana.geometry("980x540")
     ventana.resizable(False, False)
     ventana.configure(bg="#ff9ff3")
+
+    # Verificar conexión a la base de datos al inicio
+    conn_test = conectar_db()
+    if not conn_test:
+        messagebox.showerror("Error Crítico", "No se puede conectar a la base de datos. La aplicación se cerrará.")
+        ventana.destroy()
+        return
+    conn_test.close()
 
     # Centrar ventana
     ventana.update_idletasks()
@@ -88,7 +184,6 @@ def iniciar_inventario():
              bg="#e84393", fg="white").pack(side="left", padx=(10, 0), pady=18)
     tk.Label(header_left, text="Gestión de Productos", font=("Segoe UI", 12),
              bg="#e84393", fg="#ffd3e8").pack(side="left", padx=(15, 0), pady=20)
-
 
     # Info fecha y hora en header_right
     header_right = tk.Frame(header_frame, bg="#e84393")
@@ -112,15 +207,19 @@ def iniciar_inventario():
     main_content = tk.Frame(ventana, bg="#ffeaa7")
     main_content.pack(fill="both", expand=True, padx=20, pady=20)
 
-
     def cargar_tabla():
-        for item in tabla.get_children():
-            tabla.delete(item)
-        for producto in obtener_productos():
-            id, codigo, nombre, precio, costo, stock = producto
-            tabla.insert("", "end", values=(
-                id, codigo, nombre, formato_peso(precio), formato_peso(costo), stock
-            ))
+        """Carga los productos en la tabla"""
+        try:
+            for item in tabla.get_children():
+                tabla.delete(item)
+            productos = obtener_productos()
+            for producto in productos:
+                id, codigo, nombre, precio, costo, stock = producto
+                tabla.insert("", "end", values=(
+                    id, codigo, nombre, formato_peso(precio), formato_peso(costo), stock
+                ))
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al cargar tabla: {e}")
 
     # Helper function for modern buttons
     def crear_boton_moderno(parent, texto, icono, color, comando):
@@ -165,7 +264,8 @@ def iniciar_inventario():
         y_offset = ventana.winfo_y() + (ventana.winfo_height() // 2) - (380 // 2)
         ventana_registro.geometry(f"380x380+{x_offset}+{y_offset}")
 
-        tk.Label(ventana_registro, text="Nuevo Producto", font=("Segoe UI", 14, "bold"), bg="#FFF0F5", fg="#e84393").pack(pady=10)
+        tk.Label(ventana_registro, text="Nuevo Producto", font=("Segoe UI", 14, "bold"), 
+                bg="#FFF0F5", fg="#e84393").pack(pady=10)
 
         campos_frame = tk.Frame(ventana_registro, bg="#FFF0F5")
         campos_frame.pack(pady=10)
@@ -173,7 +273,8 @@ def iniciar_inventario():
         entries = {}
         row = 0
         for campo in ["Código", "Nombre", "Precio", "Costo", "Stock"]:
-            tk.Label(campos_frame, text=campo + ":", bg="#FFF0F5", font=("Segoe UI", 10)).grid(row=row, column=0, padx=10, pady=5, sticky="w")
+            tk.Label(campos_frame, text=campo + ":", bg="#FFF0F5", 
+                    font=("Segoe UI", 10)).grid(row=row, column=0, padx=10, pady=5, sticky="w")
             entry = tk.Entry(campos_frame, width=35, font=("Segoe UI", 10), bd=1, relief="solid")
             entry.grid(row=row, column=1, padx=10, pady=5)
             entries[campo] = entry
@@ -187,7 +288,9 @@ def iniciar_inventario():
             stock_str = entries["Stock"].get().strip()
 
             if not codigo or not nombre:
-                messagebox.showwarning("Campos vacíos", "El código y el nombre del producto son obligatorios.", parent=ventana_registro)
+                messagebox.showwarning("Campos vacíos", 
+                                     "El código y el nombre del producto son obligatorios.", 
+                                     parent=ventana_registro)
                 return
 
             try:
@@ -195,21 +298,22 @@ def iniciar_inventario():
                 costo = float(costo_str) if costo_str else 0.0
                 stock = int(stock_str) if stock_str else 0
                 
-                # --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE ---
-                # Se asegura que el código siempre tenga 5 dígitos.
+                # Formatear el código a 5 dígitos
                 codigo_formateado = codigo.zfill(5)
                 
-                guardar_producto(codigo_formateado, nombre, precio, costo, stock)
-                messagebox.showinfo("Éxito", "Producto registrado exitosamente.", parent=ventana_registro)
-                ventana_registro.destroy()
-                cargar_tabla()
+                if guardar_producto(codigo_formateado, nombre, precio, costo, stock):
+                    messagebox.showinfo("Éxito", "Producto registrado exitosamente.", 
+                                      parent=ventana_registro)
+                    ventana_registro.destroy()
+                    cargar_tabla()
+                
             except ValueError:
-                messagebox.showerror("Error de formato", "Por favor, introduce valores numéricos válidos para Precio, Costo y Stock.", parent=ventana_registro)
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo registrar el producto: {e}", parent=ventana_registro)
+                messagebox.showerror("Error de formato", 
+                                   "Por favor, introduce valores numéricos válidos para Precio, Costo y Stock.", 
+                                   parent=ventana_registro)
 
         crear_boton_moderno(ventana_registro, "Guardar Producto", "✅", "#55efc4", registrar).pack(pady=15, padx=20)
-        ventana_registro.wait_window()
+        entries["Código"].focus()
 
     def editar_producto():
         seleccionado = tabla.focus()
@@ -237,7 +341,8 @@ def iniciar_inventario():
         y_offset = ventana.winfo_y() + (ventana.winfo_height() // 2) - (380 // 2)
         ventana_edicion.geometry(f"380x380+{x_offset}+{y_offset}")
 
-        tk.Label(ventana_edicion, text="Editar Producto", font=("Segoe UI", 14, "bold"), bg="#FFF0F5", fg="#e84393").pack(pady=10)
+        tk.Label(ventana_edicion, text="Editar Producto", font=("Segoe UI", 14, "bold"), 
+                bg="#FFF0F5", fg="#e84393").pack(pady=10)
 
         campos_frame = tk.Frame(ventana_edicion, bg="#FFF0F5")
         campos_frame.pack(pady=10)
@@ -253,10 +358,10 @@ def iniciar_inventario():
         ]
         
         for campo, valor in campos:
-            tk.Label(campos_frame, text=campo + ":", bg="#FFF0F5", font=("Segoe UI", 10)).grid(row=row, column=0, padx=10, pady=5, sticky="w")
+            tk.Label(campos_frame, text=campo + ":", bg="#FFF0F5", 
+                    font=("Segoe UI", 10)).grid(row=row, column=0, padx=10, pady=5, sticky="w")
             entry = tk.Entry(campos_frame, width=35, font=("Segoe UI", 10), bd=1, relief="solid")
-            entry.insert(0, valor) # Pre-populate with existing value
-            # El código no debe ser editable para evitar inconsistencias
+            entry.insert(0, str(valor))
             if campo == "Código":
                 entry.config(state="readonly")
             entry.grid(row=row, column=1, padx=10, pady=5)
@@ -270,7 +375,8 @@ def iniciar_inventario():
             stock_str = entries["Stock"].get().strip()
 
             if not nombre:
-                messagebox.showwarning("Campo vacío", "El nombre del producto es obligatorio.", parent=ventana_edicion)
+                messagebox.showwarning("Campo vacío", "El nombre del producto es obligatorio.", 
+                                     parent=ventana_edicion)
                 return
 
             try:
@@ -278,17 +384,19 @@ def iniciar_inventario():
                 costo = float(costo_str) if costo_str else 0.0
                 stock = int(stock_str) if stock_str else 0
                 
-                actualizar_producto(id_producto, nombre, precio, costo, stock)
-                messagebox.showinfo("Actualizado", "Producto editado correctamente.", parent=ventana_edicion)
-                ventana_edicion.destroy()
-                cargar_tabla()
+                if actualizar_producto(id_producto, nombre, precio, costo, stock):
+                    messagebox.showinfo("Actualizado", "Producto editado correctamente.", 
+                                      parent=ventana_edicion)
+                    ventana_edicion.destroy()
+                    cargar_tabla()
+                
             except ValueError:
-                messagebox.showerror("Error de formato", "Por favor, introduce valores numéricos válidos para Precio, Costo y Stock.", parent=ventana_edicion)
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo editar el producto: {e}", parent=ventana_edicion)
+                messagebox.showerror("Error de formato", 
+                                   "Por favor, introduce valores numéricos válidos para Precio, Costo y Stock.", 
+                                   parent=ventana_edicion)
 
         crear_boton_moderno(ventana_edicion, "Guardar Cambios", "💾", "#74b9ff", guardar_cambios).pack(pady=15, padx=20)
-        ventana_edicion.wait_window()
+        entries["Nombre"].focus()
 
     def eliminar_producto_seleccionado():
         seleccionado = tabla.focus()
@@ -300,14 +408,13 @@ def iniciar_inventario():
         id_producto = valores[0]
         nombre_producto = valores[2]
 
-        confirmacion = messagebox.askyesno("Confirmar Eliminación", f"¿Estás seguro de que quieres eliminar '{nombre_producto}'?", icon="warning")
+        confirmacion = messagebox.askyesno("Confirmar Eliminación", 
+                                         f"¿Estás seguro de que quieres eliminar '{nombre_producto}'?", 
+                                         icon="warning")
         if confirmacion:
-            try:
-                eliminar_producto(id_producto)
+            if eliminar_producto(id_producto):
                 messagebox.showinfo("Eliminado", "Producto eliminado correctamente.")
                 cargar_tabla()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo eliminar el producto: {e}")
 
     # Panel for main action buttons
     panel_acciones = tk.Frame(main_content, bg="white", bd=3, relief="solid")
@@ -319,15 +426,13 @@ def iniciar_inventario():
     crear_boton_moderno(panel_acciones, "Registrar", "➕", "#fd79a8", abrir_ventana_registro)
     crear_boton_moderno(panel_acciones, "Editar", "✏️", "#74b9ff", editar_producto)
     crear_boton_moderno(panel_acciones, "Eliminar", "🗑️", "#ff7675", eliminar_producto_seleccionado)
-    crear_boton_moderno(panel_acciones, "Exportar", "📤", "#fdcb6e", lambda: messagebox.showinfo("Info", "Funcionalidad de exportar no implementada aún."))
-
+    crear_boton_moderno(panel_acciones, "Actualizar", "🔄", "#a29bfe", cargar_tabla)
 
     frame_tabla = tk.Frame(main_content, bg="white", bd=3, relief="solid")
     frame_tabla.pack(side="right", fill="both", expand=True, pady=0, padx=0)
 
     tk.Label(frame_tabla, text="📦 LISTADO DE PRODUCTOS", font=("Segoe UI", 14, "bold"),
              bg="white", fg="#e84393").pack(pady=20)
-
 
     columnas = ("Id", "Código", "Producto", "Precio", "Costo", "Stock")
     tabla = ttk.Treeview(frame_tabla, columns=columnas, show="headings", height=15)
@@ -352,7 +457,6 @@ def iniciar_inventario():
     style.map("Treeview.Heading",
               background=[('active', '#e84393')])
 
-
     tabla.heading("Id", text="Id")
     tabla.heading("Código", text="Código")
     tabla.heading("Producto", text="Producto")
@@ -368,6 +472,8 @@ def iniciar_inventario():
     tabla.column("Stock", width=80, anchor="center")
 
     tabla.pack(fill="both", expand=True, padx=20, pady=10)
+    
+    # Cargar datos iniciales
     cargar_tabla()
 
     # 📊 Footer con información del sistema
