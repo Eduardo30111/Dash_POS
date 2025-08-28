@@ -3,19 +3,23 @@ from tkinter import ttk
 import subprocess
 import datetime
 from tkinter import messagebox
+import sqlite3
+import os
 
-# Note: The imported modules below are assumed to exist in your project.
-# You will need to make sure they are in the same directory or on the Python path.
-# from reportes_menu import iniciar_reportes
-# from clientes_menu import iniciar_clientes
-# from configuracion_menu import iniciar_configuracion
-# from gastos_menu import iniciar_gastos
-# from usuarios_menu import iniciar_usuarios
+# Importaciones de los módulos de interfaz
 from pantalla_carga import mostrar_carga
-# from usuarios_db import obtener_permisos_por_usuario # This module is not available
+from reportes_menu import iniciar_reportes
+from clientes_menu import iniciar_clientes
+from configuracion_menu import iniciar_configuracion
+from usuarios_menu import iniciar_usuarios
+from inventario_menu import iniciar_inventario
 
-# Diccionario de permisos predefinidos para cada rol.
-# Esto reemplaza la llamada a 'obtener_permisos_por_usuario' que no estaba disponible.
+# Ruta de la base de datos. Se ha actualizado la ruta absoluta según tu indicación.
+# Es importante que esta ruta sea exactamente donde se encuentra tu base de datos.
+# Puedes volver a la ruta relativa si el archivo .py y la carpeta database se mantienen.
+ruta_db = r'C:\Users\sanch\OneDrive\Escritorio\Sistema Ventas\database\ventas.db'
+
+# Diccionario de permisos predefinidos para cada rol
 PERMISOS = {
     "admin": {
         "Ventas": 1,
@@ -39,17 +43,20 @@ PERMISOS = {
 
 class VmPOSDashboard(tk.Tk):
     """
-    Main application class for the VmPOS Dashboard.
-    It inherits from tk.Tk, making the class instance the main window.
+    Clase principal de la aplicación para el Dashboard de VmPOS.
+    Hereda de tk.Tk, haciendo que la instancia de la clase sea la ventana principal.
     """
     def __init__(self, usuario="Admin", datos_usuario=None):
         super().__init__()
 
         self.usuario = usuario
-        self.datos_usuario = datos_usuario
-        # Corregido: Se usa la clave 'permisos' del diccionario de login.
+        self.datos_usuario = datos_usuario or {}
+        # Obtener el rol del usuario de los datos de login
         self.rol_usuario = self.datos_usuario.get('permisos', "admin").capitalize()
         self.permisos = self._get_user_permissions()
+        
+        # Variables para estadísticas
+        self.stats_widgets = {}
         
         self._setup_main_window()
         self._create_header()
@@ -57,20 +64,23 @@ class VmPOSDashboard(tk.Tk):
         self._create_footer()
         self._bind_shortcuts()
         
+        # Actualizar estadísticas cada 30 segundos
+        self._actualizar_estadisticas()
+        self.after(30000, self._programa_actualizacion_stats)
+        
         # Ocultar la pantalla de carga después de inicializar el dashboard
         if 'ventana_carga' in self.datos_usuario:
             self.datos_usuario['ventana_carga'].destroy()
 
     def _get_user_permissions(self):
         """
-        Retrieves user permissions based on the user's role.
+        Obtiene los permisos del usuario basados en su rol.
         """
-        # Corregido: Se obtiene el rol del usuario y se buscan los permisos en el diccionario predefinido.
         rol = self.datos_usuario.get('permisos', 'vendedor')
         return PERMISOS.get(rol, PERMISOS['vendedor'])
 
     def _setup_main_window(self):
-        """Configures the main window properties."""
+        """Configura las propiedades de la ventana principal."""
         self.title(f"VmPOS - Dashboard • {self.usuario} ({self.rol_usuario})")
         self.geometry("1200x700")
         self.resizable(False, False)
@@ -81,33 +91,168 @@ class VmPOSDashboard(tk.Tk):
         self.geometry(f"1200x700+{x}+{y}")
 
     def _create_header(self):
-        """Creates and packs the application header."""
+        """Crea y empaqueta el encabezado de la aplicación."""
         header_frame = tk.Frame(self, bg="#e84393", height=80)
         header_frame.pack(fill="x")
         header_frame.pack_propagate(False)
 
-        # Left side of header (logo and title)
+        # Lado izquierdo del encabezado (logo y título)
         header_left = tk.Frame(header_frame, bg="#e84393")
         header_left.pack(side="left", fill="y", padx=30)
         tk.Label(header_left, text="🌸", font=("Segoe UI Emoji", 28), bg="#e84393", fg="white").pack(side="left", pady=15)
         tk.Label(header_left, text="VmPOS", font=("Segoe UI", 24, "bold"), bg="#e84393", fg="white").pack(side="left", padx=(10, 0), pady=18)
         tk.Label(header_left, text="Centro de Copiado & Papelería", font=("Segoe UI", 12), bg="#e84393", fg="#ffd3e8").pack(side="left", padx=(15, 0), pady=20)
 
-        # Right side of header (user info)
+        # Lado derecho del encabezado (información del usuario con hora en vivo)
         header_right = tk.Frame(header_frame, bg="#e84393")
         header_right.pack(side="right", fill="y", padx=30)
+        
+        # Información del usuario
+        emoji_rol = "👑" if self.rol_usuario == "Admin" else "👩‍💼"
+        tk.Label(header_right, text=f"👤 {self.usuario}", font=("Segoe UI", 14, "bold"), bg="#e84393", fg="white").pack(anchor="e", pady=(12, 2))
+        
+        # Fecha y hora en tiempo real
+        self.lbl_fecha_hora = tk.Label(header_right, text="", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8")
+        self.lbl_fecha_hora.pack(anchor="e")
+        
+        tk.Label(header_right, text=f"{emoji_rol} {self.rol_usuario}", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack(anchor="e", pady=(2, 12))
+        
+        # Actualizar fecha y hora
+        self._actualizar_fecha_hora()
+
+    def _actualizar_fecha_hora(self):
+        """Actualiza la fecha y hora en tiempo real."""
         now = datetime.datetime.now()
         fecha_actual = now.strftime("%d/%m/%Y")
-        hora_actual = now.strftime("%H:%M")
-        # Corregido: Se usa el rol del usuario para el emoji
-        emoji_rol = "👑" if self.rol_usuario == "Admin" else "👩‍💼"
+        hora_actual = now.strftime("%H:%M:%S")
+        self.lbl_fecha_hora.config(text=f"📅 {fecha_actual} • 🕐 {hora_actual}")
+        # Programar la siguiente actualización en 1 segundo
+        self.after(1000, self._actualizar_fecha_hora)
 
-        tk.Label(header_right, text=f"👤 {self.usuario}", font=("Segoe UI", 14, "bold"), bg="#e84393", fg="white").pack(anchor="e", pady=(12, 2))
-        tk.Label(header_right, text=f"📅 {fecha_actual} • 🕐 {hora_actual}", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack(anchor="e")
-        tk.Label(header_right, text=f"{emoji_rol} {self.rol_usuario}", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack(anchor="e", pady=(2, 12))
+    def _obtener_ganancias_hoy(self):
+        """
+        Obtiene el total de ganancias del día actual calculando la diferencia
+        entre el precio de venta y el costo de cada producto vendido.
+        """
+        try:
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
+            
+            print(f"Buscando ganancias totales para la fecha: {fecha_hoy}")
+            
+            # Consulta SQL para calcular la ganancia:
+            # (precio_unitario - costo_unitario) * cantidad
+            # Se usa COALESCE para tratar los valores NULL de costo_unitario como 0
+            cursor.execute("""
+                SELECT SUM((t2.precio_unitario - COALESCE(t3.costo_unitario, 0)) * t2.cantidad)
+                FROM ventas AS t1
+                INNER JOIN detalle_venta AS t2 ON t1.id = t2.venta_id
+                INNER JOIN productos AS t3 ON t2.producto_id = t3.id
+                WHERE DATE(t1.fecha) = ?
+            """, (fecha_hoy,))
+            resultado = cursor.fetchone()[0]
+            conn.close()
+            
+            # Imprimir el resultado de la consulta para depuración
+            print(f"Resultado de la consulta de ganancias: {resultado}")
+            
+            return resultado if resultado else 0
+        except Exception as e:
+            print(f"Error al obtener ganancias de hoy: {e}")
+            return 0
+
+    def _obtener_total_productos_inventario(self):
+        """Obtiene el total de productos en inventario."""
+        try:
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM productos")
+            resultado = cursor.fetchone()[0]
+            conn.close()
+            return resultado if resultado else 0
+        except Exception as e:
+            print(f"Error al obtener total de productos: {e}")
+            return 0
+            
+    def _obtener_clientes_unicos_hoy(self):
+        """
+        Obtiene el número de clientes únicos que han comprado hoy,
+        uniendo la tabla 'ventas' con 'detalle_venta' para asegurar que hubo un pedido.
+        """
+        try:
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
+            print(f"Buscando clientes únicos para la fecha: {fecha_hoy}")
+            
+            # Usar JOIN para asegurar que solo se cuenten las ventas que tienen un detalle
+            # DISTINCT para contar clientes únicos
+            cursor.execute("""
+                SELECT COUNT(DISTINCT t1.cliente_id)
+                FROM ventas AS t1
+                INNER JOIN detalle_venta AS t2 ON t1.id = t2.venta_id
+                WHERE DATE(t1.fecha) = ?
+            """, (fecha_hoy,))
+            resultado = cursor.fetchone()[0]
+            conn.close()
+            return resultado if resultado else 0
+        except Exception as e:
+            print(f"Error al obtener clientes únicos de hoy: {e}")
+            return 0
+
+    def _obtener_pedidos_hoy(self):
+        """
+        Obtiene el número de pedidos realizados hoy, consultando la tabla 'ventas'.
+        """
+        try:
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
+            print(f"Buscando pedidos totales para la fecha: {fecha_hoy}")
+            # Contar el número de filas en la tabla de ventas para la fecha de hoy
+            cursor.execute("SELECT COUNT(*) FROM ventas WHERE DATE(fecha) = ?", (fecha_hoy,))
+            resultado = cursor.fetchone()[0]
+            conn.close()
+            return resultado if resultado else 0
+        except Exception as e:
+            print(f"Error al obtener pedidos de hoy: {e}")
+            return 0
+
+    def _actualizar_estadisticas(self):
+        """Actualiza todas las estadísticas del dashboard."""
+        try:
+            # Obtener datos actualizados
+            ganancias_hoy = self._obtener_ganancias_hoy()
+            total_productos = self._obtener_total_productos_inventario()
+            clientes_hoy = self._obtener_clientes_unicos_hoy()
+            pedidos_hoy = self._obtener_pedidos_hoy()
+            
+            # Actualizar widgets si existen
+            if 'ganancias' in self.stats_widgets:
+                # Usar formato_peso si está disponible, si no, solo el formato de miles
+                try:
+                    from inventario_menu import formato_peso
+                    self.stats_widgets['ganancias'].config(text=formato_peso(ganancias_hoy))
+                except ImportError:
+                    self.stats_widgets['ganancias'].config(text=f"${ganancias_hoy:,.0f}")
+            if 'productos' in self.stats_widgets:
+                self.stats_widgets['productos'].config(text=str(total_productos))
+            if 'clientes' in self.stats_widgets:
+                self.stats_widgets['clientes'].config(text=str(clientes_hoy))
+            if 'pedidos' in self.stats_widgets:
+                self.stats_widgets['pedidos'].config(text=str(pedidos_hoy))
+                
+        except Exception as e:
+            print(f"Error al actualizar estadísticas: {e}")
+
+    def _programa_actualizacion_stats(self):
+        """Programa la próxima actualización de estadísticas."""
+        self._actualizar_estadisticas()
+        self.after(30000, self._programa_actualizacion_stats)
 
     def _create_main_content(self,):
-        """Creates and packs the main content area, including stats and buttons."""
+        """Crea y empaqueta el área de contenido principal, incluyendo estadísticas y botones."""
         main_content = tk.Frame(self, bg="#ffeaa7")
         main_content.pack(fill="both", expand=True, padx=20, pady=20)
 
@@ -115,7 +260,7 @@ class VmPOSDashboard(tk.Tk):
         self._create_buttons_panel(main_content)
         self._create_quick_access_panel(main_content)
         
-        # Display seller mode info if applicable
+        # Mostrar información del modo vendedor si aplica
         if self.rol_usuario == "Vendedor":
             permisos_info = tk.Frame(main_content, bg="#FFF3E0", bd=1, relief="solid", height=40)
             permisos_info.pack(fill="x", pady=(10, 0))
@@ -125,20 +270,19 @@ class VmPOSDashboard(tk.Tk):
 
     def _create_stats_panel(self, parent):
         """
-        Creates the statistics panel at the top of the main content area.
-        Values have been set to zero as requested.
+        Crea el panel de estadísticas en la parte superior del área de contenido principal.
         """
         stats_frame = tk.Frame(parent, bg="#ffeaa7")
         stats_frame.pack(fill="x", pady=(0, 20))
 
         stats = [
-            ("💖", "Ventas Hoy", "$0", "#fd79a8"),
-            ("🎀", "Productos", "0", "#74b9ff"),
-            ("💎", "Clientes", "0", "#a29bfe"),
-            ("🌈", "Pedidos", "0", "#55efc4")
+            ("💖", "Ganancias Hoy", "ganancias", "#fd79a8"), # Se cambia "Ventas Hoy" a "Ganancias Hoy"
+            ("🎀", "Productos", "productos", "#74b9ff"),
+            ("💎", "Clientes", "clientes", "#a29bfe"),
+            ("🌈", "Pedidos", "pedidos", "#55efc4")
         ]
 
-        for i, (icono, titulo, valor, color) in enumerate(stats):
+        for i, (icono, titulo, key, color) in enumerate(stats):
             stat_card = tk.Frame(stats_frame, bg="white", bd=2, relief="solid")
             stat_card.pack(side="left", fill="both", expand=True, padx=(0 if i == 0 else 10, 0))
 
@@ -148,10 +292,14 @@ class VmPOSDashboard(tk.Tk):
             card_content.pack(fill="both", expand=True, padx=20, pady=15)
             tk.Label(card_content, text=icono, font=("Segoe UI Emoji", 24), bg="white").pack()
             tk.Label(card_content, text=titulo, font=("Segoe UI", 11), bg="white", fg="#636e72").pack()
-            tk.Label(card_content, text=valor, font=("Segoe UI", 16, "bold"), bg="white", fg="#2d3436").pack()
+            
+            # Crear widget de valor y guardarlo en el diccionario
+            valor_widget = tk.Label(card_content, text="$0", font=("Segoe UI", 16, "bold"), bg="white", fg="#2d3436")
+            valor_widget.pack()
+            self.stats_widgets[key] = valor_widget
 
     def _create_buttons_panel(self, parent):
-        """Creates the main panel with operational, management, and configuration buttons."""
+        """Crea el panel principal con botones de operación, gestión y configuración."""
         buttons_container = tk.Frame(parent, bg="#ffeaa7")
         buttons_container.pack(fill="both", expand=True)
 
@@ -175,7 +323,7 @@ class VmPOSDashboard(tk.Tk):
         self._crear_boton_moderno(right_panel, "Usuarios", "👸", "#fd79a8", lambda: self._accion("Usuarios"), "Usuarios")
 
     def _create_quick_access_panel(self, parent):
-        """Creates the quick access panel at the bottom of the main content area."""
+        """Crea el panel de acceso rápido en la parte inferior del área de contenido principal."""
         quick_access = tk.Frame(parent, bg="#e84393", height=80)
         quick_access.pack(fill="x", pady=(20, 0))
         quick_access.pack_propagate(False)
@@ -188,11 +336,11 @@ class VmPOSDashboard(tk.Tk):
             ("🌟", "Nueva Factura", "#fd79a8", "Ventas", lambda: self._accion("Ventas")),
             ("💎", "Consultar Stock", "#74b9ff", "Inventario", lambda: self._accion("Inventario")),
             ("🎀", "Backup", "#55efc4", "Configuración", lambda: self._accion("Configuración")),
-            ("✨", "Sincronizar", "#fdcb6e", "Configuración", lambda: self._accion("Configuración"))
+            ("✨", "Sincronizar", "#fdcb6e", "Configuración", lambda: self._actualizar_estadisticas())
         ]
         
         for icono, texto, color, modulo, comando in quick_buttons:
-            tiene_permiso = self.permisos.get(modulo, 0) == 1
+            tiene_permiso = self.permisos.get(modulo, 0) == 1 if modulo != "Configuración" or texto != "Sincronizar" else True
             color_final = color if tiene_permiso else "#BDBDBD"
             cursor_final = "hand2" if tiene_permiso else "no"
 
@@ -205,8 +353,8 @@ class VmPOSDashboard(tk.Tk):
                                  command=_on_click(comando, tiene_permiso))
             quick_btn.pack(side="left", padx=5)
 
-    def _create_footer(self,):
-        """Creates and packs the application footer."""
+    def _create_footer(self):
+        """Crea y empaqueta el pie de página de la aplicación."""
         footer = tk.Frame(self, bg="#e84393", height=50)
         footer.pack(fill="x")
         footer.pack_propagate(False)
@@ -220,14 +368,14 @@ class VmPOSDashboard(tk.Tk):
         tk.Label(footer_right, text="✨ VmPOS v3.1.0 • Sistema Activo 💖", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack()
 
     def _bind_shortcuts(self):
-        """Binds keyboard shortcuts for quick access."""
+        """Vincula los atajos de teclado para un acceso rápido."""
         self.bind("<KeyPress>", self._shortcuts)
         self.focus_set()
 
     def _shortcuts(self, event):
-        """Handles keyboard shortcuts."""
+        """Maneja los atajos de teclado."""
         key = event.keysym.lower()
-        if event.state & 4:  # Check if Ctrl is pressed
+        if event.state & 4:  # Verifica si Ctrl está presionado
             if key == 'v' and self.permisos.get("Ventas", 0) == 1:
                 self._accion("Ventas")
             elif key == 'i' and self.permisos.get("Inventario", 0) == 1:
@@ -236,9 +384,11 @@ class VmPOSDashboard(tk.Tk):
                 self._accion("Clientes")
             elif key == 'r' and self.permisos.get("Reportes", 0) == 1:
                 self._accion("Reportes")
+            elif key == 'f5':  # F5 para actualizar estadísticas
+                self._actualizar_estadisticas()
 
     def _mostrar_alerta_sin_permisos(self):
-        """Displays a custom alert when a user lacks permissions."""
+        """Muestra una alerta personalizada cuando un usuario no tiene permisos."""
         alerta = tk.Toplevel(self)
         alerta.title("🚫 Acceso Denegado")
         alerta.geometry("400x250")
@@ -246,7 +396,7 @@ class VmPOSDashboard(tk.Tk):
         alerta.resizable(False, False)
         alerta.grab_set()
 
-        # Center the alert window
+        # Centrar la ventana de alerta
         alerta.update_idletasks()
         x = (alerta.winfo_screenwidth() // 2) - (400 // 2)
         y = (alerta.winfo_screenheight() // 2) - (250 // 2)
@@ -268,8 +418,7 @@ class VmPOSDashboard(tk.Tk):
 
     def _crear_boton_moderno(self, parent, texto, icono, color, comando, modulo=None):
         """
-        Creates a stylish button with permission checks and hover effects.
-        Prefixed with underscore to indicate it's an internal helper method.
+        Crea un botón con estilo con verificación de permisos y efectos de hover.
         """
         tiene_permiso = self.permisos.get(modulo, 0) == 1
         btn_frame = tk.Frame(parent, bg="white")
@@ -285,13 +434,13 @@ class VmPOSDashboard(tk.Tk):
             cursor_final = "hand2"
 
         btn = tk.Button(btn_frame, text=texto_final,
-                       font=("Segoe UI", 12, "bold"), bg=color_final, fg="white",
-                       bd=0, pady=15, cursor=cursor_final,
-                       command=lambda: comando() if tiene_permiso else self._mostrar_alerta_sin_permisos(),
-                       relief="flat", anchor="w", padx=20)
+                        font=("Segoe UI", 12, "bold"), bg=color_final, fg="white",
+                        bd=0, pady=15, cursor=cursor_final,
+                        command=lambda: comando() if tiene_permiso else self._mostrar_alerta_sin_permisos(),
+                        relief="flat", anchor="w", padx=20)
         btn.pack(fill="x")
 
-        # Hover effects only for enabled buttons
+        # Efectos de hover solo para botones habilitados
         if tiene_permiso:
             color_hover = {
                 "#fd79a8": "#e84393",
@@ -310,30 +459,46 @@ class VmPOSDashboard(tk.Tk):
             btn.bind("<Enter>", on_enter)
             btn.bind("<Leave>", on_leave)
 
+    def _abrir_ventas(self):
+        """Abre el módulo de ventas."""
+        try:
+            subprocess.Popen(["python", os.path.join(os.path.dirname(__file__), "ventas_menu.py")])
+            messagebox.showinfo("✅ Ventas", "Abriendo módulo de ventas...")
+        except Exception as e:
+            messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de ventas:\n{e}")
+
     def _accion(self, nombre):
-        """Centralized function to handle all button actions."""
-        # Check permissions here as a fallback, although buttons are already disabled
+        """Función centralizada para manejar todas las acciones de los botones."""
+        # Verificar permisos aquí como un respaldo
         if self.permisos.get(nombre, 0) == 0:
             self._mostrar_alerta_sin_permisos()
             return
 
-        # Use a dictionary or 'match/case' for cleaner action handling
-        actions = {
-            "Ventas": lambda: subprocess.Popen(["python", "ventas_menu.py"]),
-            "Inventario": lambda: subprocess.Popen(["python", "inventario_menu.py"]),
-            # Estas funciones requieren la existencia de los módulos importados
-            "Clientes": iniciar_clientes,
-            "Reportes": iniciar_reportes,
-            "Configuración": iniciar_configuracion,
-            "Gastos": iniciar_gastos,
-            "Usuarios": iniciar_usuarios,
-        }
-        
-        action = actions.get(nombre)
-        if action:
-            action()
+        try:
+            # Diccionario para el manejo de acciones
+            actions = {
+                "Ventas": self._abrir_ventas,
+                "Inventario": iniciar_inventario,
+                "Clientes": iniciar_clientes,
+                "Reportes": iniciar_reportes,
+                "Configuración": iniciar_configuracion,
+                "Usuarios": iniciar_usuarios,
+                "Gastos": lambda: messagebox.showinfo("🌸 Gastos", "Módulo de gastos en desarrollo...")
+            }
+            
+            action = actions.get(nombre)
+            if action:
+                # Actualizar estadísticas antes de abrir módulo
+                if nombre in ["Ventas", "Inventario"]:
+                    self.after(1000, self._actualizar_estadisticas)
+                action()
+            else:
+                messagebox.showwarning("⚠️ Módulo no disponible", f"El módulo {nombre} no está disponible aún.")
+                
+        except Exception as e:
+            messagebox.showerror("❌ Error", f"Error al abrir {nombre}:\n{str(e)}")
 
-# --- Entry point from login ---
+# --- Punto de entrada desde el login ---
 def iniciar_dashboard(usuario, datos_usuario):
     """
     Función de entrada principal para lanzar el dashboard.
@@ -342,7 +507,7 @@ def iniciar_dashboard(usuario, datos_usuario):
     app = VmPOSDashboard(usuario=usuario, datos_usuario=datos_usuario)
     app.mainloop()
 
-# --- Main entry point for standalone testing (ejecutar este archivo directamente) ---
+# --- Punto de entrada principal para pruebas independientes ---
 if __name__ == "__main__":
     # Simular una llamada desde la pantalla de login
     # para probar los diferentes roles.
@@ -352,7 +517,7 @@ if __name__ == "__main__":
     print(f"Probando con usuario: {mock_admin_data['usuario']} ({mock_admin_data['permisos']})")
     iniciar_dashboard(mock_admin_data['usuario'], mock_admin_data)
 
-    # # Usuario Vendedor
+    # # Usuario Vendedor (descomenta para probar)
     # mock_vendedor_data = {'usuario': 'Andres', 'permisos': 'vendedor'}
     # print(f"Probando con usuario: {mock_vendedor_data['usuario']} ({mock_vendedor_data['permisos']})")
     # iniciar_dashboard(mock_vendedor_data['usuario'], mock_vendedor_data)
