@@ -7,17 +7,44 @@ import sqlite3
 import os
 
 # Importaciones de los módulos de interfaz
-from pantalla_carga import mostrar_carga
-from reportes_menu import iniciar_reportes
-from clientes_menu import iniciar_clientes
-from configuracion_menu import iniciar_configuracion
-from usuarios_menu import iniciar_usuarios
-from inventario_menu import iniciar_inventario
+try:
+    from pantalla_carga import mostrar_carga
+except ImportError:
+    print("Warning: pantalla_carga module not found")
 
-# Ruta de la base de datos. Se ha actualizado la ruta absoluta según tu indicación.
-# Es importante que esta ruta sea exactamente donde se encuentra tu base de datos.
-# Puedes volver a la ruta relativa si el archivo .py y la carpeta database se mantienen.
-ruta_db = r'C:\Users\sanch\OneDrive\Escritorio\Sistema Ventas\database\ventas.db'
+try:
+    from reportes_menu import iniciar_reportes
+except ImportError:
+    print("Warning: reportes_menu module not found")
+
+try:
+    from clientes_menu import iniciar_clientes
+except ImportError:
+    print("Warning: clientes_menu module not found")
+
+try:
+    from configuracion_menu import iniciar_configuracion
+except ImportError:
+    print("Warning: configuracion_menu module not found")
+
+try:
+    from usuarios_menu import iniciar_usuarios
+except ImportError:
+    print("Warning: usuarios_menu module not found")
+
+try:
+    from inventario_menu import iniciar_inventario
+except ImportError:
+    print("Warning: inventario_menu module not found")
+
+# Ruta de la base de datos
+base_dir = os.path.dirname(os.path.abspath(__file__))
+database_dir = os.path.join(base_dir, '..', 'database')
+ruta_db = os.path.join(database_dir, 'ventas.db')
+
+# Verificar si existe la base de datos
+if not os.path.exists(ruta_db):
+    print(f"Advertencia: Base de datos no encontrada en {ruta_db}")
 
 # Diccionario de permisos predefinidos para cada rol
 PERMISOS = {
@@ -131,33 +158,54 @@ class VmPOSDashboard(tk.Tk):
 
     def _obtener_ganancias_hoy(self):
         """
-        Obtiene el total de ganancias del día actual calculando la diferencia
-        entre el precio de venta y el costo de cada producto vendido.
+        Obtiene las ganancias netas del día actual (ventas - gastos).
         """
         try:
             conn = sqlite3.connect(ruta_db)
             cursor = conn.cursor()
             fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
             
-            print(f"Buscando ganancias totales para la fecha: {fecha_hoy}")
+            print(f"Calculando ganancias netas para la fecha: {fecha_hoy}")
             
-            # Consulta SQL para calcular la ganancia:
-            # (precio_unitario - costo_unitario) * cantidad
-            # Se usa COALESCE para tratar los valores NULL de costo_unitario como 0
+            # 1. Obtener total de ventas del día
             cursor.execute("""
-                SELECT SUM((t2.precio_unitario - COALESCE(t3.costo_unitario, 0)) * t2.cantidad)
-                FROM ventas AS t1
-                INNER JOIN detalle_venta AS t2 ON t1.id = t2.venta_id
-                INNER JOIN productos AS t3 ON t2.producto_id = t3.id
-                WHERE DATE(t1.fecha) = ?
+                SELECT SUM(total_venta) 
+                FROM ventas 
+                WHERE DATE(fecha_venta) = ?
             """, (fecha_hoy,))
-            resultado = cursor.fetchone()[0]
+            resultado_ventas = cursor.fetchone()[0]
+            total_ventas = resultado_ventas if resultado_ventas else 0
+            
+            print(f"Total ventas del día: {total_ventas}")
+            
+            # 2. Obtener total de gastos del día
+            # Verificar si la tabla gastos existe
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='gastos'
+            """)
+            tabla_gastos_existe = cursor.fetchone()
+            
+            total_gastos = 0
+            if tabla_gastos_existe:
+                # Los gastos se almacenan con fecha en formato DD-MM-YYYY
+                fecha_hoy_formato_gasto = datetime.date.today().strftime('%d-%m-%Y')
+                cursor.execute("""
+                    SELECT SUM(valor) FROM gastos
+                    WHERE fecha = ?
+                """, (fecha_hoy_formato_gasto,))
+                resultado_gastos = cursor.fetchone()[0]
+                total_gastos = resultado_gastos if resultado_gastos else 0
+            
+            print(f"Total gastos del día: {total_gastos}")
+            
+            # 3. Calcular ganancia neta
+            ganancia_neta = total_ventas - total_gastos
+            print(f"Ganancia neta del día: {ganancia_neta}")
+            
             conn.close()
+            return ganancia_neta
             
-            # Imprimir el resultado de la consulta para depuración
-            print(f"Resultado de la consulta de ganancias: {resultado}")
-            
-            return resultado if resultado else 0
         except Exception as e:
             print(f"Error al obtener ganancias de hoy: {e}")
             return 0
@@ -177,8 +225,7 @@ class VmPOSDashboard(tk.Tk):
             
     def _obtener_clientes_unicos_hoy(self):
         """
-        Obtiene el número de clientes únicos que han comprado hoy,
-        uniendo la tabla 'ventas' con 'detalle_venta' para asegurar que hubo un pedido.
+        Obtiene el número de clientes únicos que han comprado hoy.
         """
         try:
             conn = sqlite3.connect(ruta_db)
@@ -186,14 +233,26 @@ class VmPOSDashboard(tk.Tk):
             fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
             print(f"Buscando clientes únicos para la fecha: {fecha_hoy}")
             
-            # Usar JOIN para asegurar que solo se cuenten las ventas que tienen un detalle
-            # DISTINCT para contar clientes únicos
-            cursor.execute("""
-                SELECT COUNT(DISTINCT t1.cliente_id)
-                FROM ventas AS t1
-                INNER JOIN detalle_venta AS t2 ON t1.id = t2.venta_id
-                WHERE DATE(t1.fecha) = ?
-            """, (fecha_hoy,))
+            # Verificar estructura de la tabla ventas
+            cursor.execute("PRAGMA table_info(ventas)")
+            columnas = cursor.fetchall()
+            columnas_nombres = [col[1] for col in columnas]
+            
+            if 'cliente_id' in columnas_nombres:
+                # Si existe columna cliente_id
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT cliente_id)
+                    FROM ventas
+                    WHERE DATE(fecha_venta) = ?
+                """, (fecha_hoy,))
+            else:
+                # Si no existe, contar las ventas únicas del día
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM ventas
+                    WHERE DATE(fecha_venta) = ?
+                """, (fecha_hoy,))
+            
             resultado = cursor.fetchone()[0]
             conn.close()
             return resultado if resultado else 0
@@ -203,15 +262,15 @@ class VmPOSDashboard(tk.Tk):
 
     def _obtener_pedidos_hoy(self):
         """
-        Obtiene el número de pedidos realizados hoy, consultando la tabla 'ventas'.
+        Obtiene el número de pedidos realizados hoy.
         """
         try:
             conn = sqlite3.connect(ruta_db)
             cursor = conn.cursor()
             fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
             print(f"Buscando pedidos totales para la fecha: {fecha_hoy}")
-            # Contar el número de filas en la tabla de ventas para la fecha de hoy
-            cursor.execute("SELECT COUNT(*) FROM ventas WHERE DATE(fecha) = ?", (fecha_hoy,))
+            
+            cursor.execute("SELECT COUNT(*) FROM ventas WHERE DATE(fecha_venta) = ?", (fecha_hoy,))
             resultado = cursor.fetchone()[0]
             conn.close()
             return resultado if resultado else 0
@@ -230,12 +289,7 @@ class VmPOSDashboard(tk.Tk):
             
             # Actualizar widgets si existen
             if 'ganancias' in self.stats_widgets:
-                # Usar formato_peso si está disponible, si no, solo el formato de miles
-                try:
-                    from inventario_menu import formato_peso
-                    self.stats_widgets['ganancias'].config(text=formato_peso(ganancias_hoy))
-                except ImportError:
-                    self.stats_widgets['ganancias'].config(text=f"${ganancias_hoy:,.0f}")
+                self.stats_widgets['ganancias'].config(text=self._formato_peso(ganancias_hoy))
             if 'productos' in self.stats_widgets:
                 self.stats_widgets['productos'].config(text=str(total_productos))
             if 'clientes' in self.stats_widgets:
@@ -245,6 +299,10 @@ class VmPOSDashboard(tk.Tk):
                 
         except Exception as e:
             print(f"Error al actualizar estadísticas: {e}")
+
+    def _formato_peso(self, valor):
+        """Formatea un valor numérico al formato peso colombiano."""
+        return f"${valor:,.0f} COP"
 
     def _programa_actualizacion_stats(self):
         """Programa la próxima actualización de estadísticas."""
@@ -276,7 +334,7 @@ class VmPOSDashboard(tk.Tk):
         stats_frame.pack(fill="x", pady=(0, 20))
 
         stats = [
-            ("💖", "Ganancias Hoy", "ganancias", "#fd79a8"), # Se cambia "Ventas Hoy" a "Ganancias Hoy"
+            ("💖", "Ganancias Hoy", "ganancias", "#fd79a8"), # Ganancias netas (ventas - gastos)
             ("🎀", "Productos", "productos", "#74b9ff"),
             ("💎", "Clientes", "clientes", "#a29bfe"),
             ("🌈", "Pedidos", "pedidos", "#55efc4")
@@ -294,7 +352,8 @@ class VmPOSDashboard(tk.Tk):
             tk.Label(card_content, text=titulo, font=("Segoe UI", 11), bg="white", fg="#636e72").pack()
             
             # Crear widget de valor y guardarlo en el diccionario
-            valor_widget = tk.Label(card_content, text="$0", font=("Segoe UI", 16, "bold"), bg="white", fg="#2d3436")
+            valor_inicial = "$0 COP" if key == "ganancias" else "0"
+            valor_widget = tk.Label(card_content, text=valor_inicial, font=("Segoe UI", 16, "bold"), bg="white", fg="#2d3436")
             valor_widget.pack()
             self.stats_widgets[key] = valor_widget
 
@@ -467,6 +526,185 @@ class VmPOSDashboard(tk.Tk):
         except Exception as e:
             messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de ventas:\n{e}")
 
+    def _abrir_control_gastos(self):
+        """Abre el módulo de control de gastos."""
+        try:
+            # Intentar abrir el módulo de gastos
+            gastos_path = os.path.join(os.path.dirname(__file__), "gastos_menu.py")
+            
+            # Verificar si el archivo existe
+            if os.path.exists(gastos_path):
+                subprocess.Popen(["python", gastos_path])
+                messagebox.showinfo("✅ Control de Gastos", "Abriendo módulo de control de gastos...")
+            else:
+                # Si no existe, mostrar una ventana temporal
+                self._mostrar_ventana_gastos_temporal()
+        except Exception as e:
+            messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de gastos:\n{e}")
+
+    def _mostrar_ventana_gastos_temporal(self):
+        """Muestra una ventana temporal para el control de gastos."""
+        ventana_gastos = tk.Toplevel(self)
+        ventana_gastos.title("🌸 Control de Gastos - Temporal")
+        ventana_gastos.geometry("600x400")
+        ventana_gastos.configure(bg="#FFF3E0")
+        ventana_gastos.transient(self)
+        ventana_gastos.grab_set()
+
+        # Centrar ventana
+        ventana_gastos.update_idletasks()
+        x = (ventana_gastos.winfo_screenwidth() // 2) - (600 // 2)
+        y = (ventana_gastos.winfo_screenheight() // 2) - (400 // 2)
+        ventana_gastos.geometry(f"600x400+{x}+{y}")
+
+        # Header
+        header_frame = tk.Frame(ventana_gastos, bg="#FF5722", height=60)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
+        
+        tk.Label(header_frame, text="🌸 CONTROL DE GASTOS", 
+                font=("Segoe UI", 16, "bold"), bg="#FF5722", fg="white").pack(pady=18)
+
+        # Contenido principal
+        main_frame = tk.Frame(ventana_gastos, bg="#FFF3E0")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Formulario para agregar gasto
+        form_frame = tk.LabelFrame(main_frame, text="Agregar Nuevo Gasto", 
+                                  bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+        form_frame.pack(fill="x", pady=10)
+
+        tk.Label(form_frame, text="Concepto:", bg="#FFF3E0", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        self.entry_concepto = tk.Entry(form_frame, font=("Segoe UI", 10), width=30)
+        self.entry_concepto.grid(row=0, column=1, padx=10, pady=5)
+
+        tk.Label(form_frame, text="Valor:", bg="#FFF3E0", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.entry_valor = tk.Entry(form_frame, font=("Segoe UI", 10), width=30)
+        self.entry_valor.grid(row=1, column=1, padx=10, pady=5)
+
+        tk.Button(form_frame, text="💾 Guardar Gasto", bg="#4CAF50", fg="white", 
+                 font=("Segoe UI", 10, "bold"), command=self._guardar_gasto_temporal).grid(row=2, column=0, columnspan=2, pady=15)
+
+        # Lista de gastos del día
+        lista_frame = tk.LabelFrame(main_frame, text="Gastos de Hoy", 
+                                   bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+        lista_frame.pack(fill="both", expand=True, pady=10)
+
+        # Treeview para mostrar gastos
+        self.tree_gastos = ttk.Treeview(lista_frame, columns=("Concepto", "Valor", "Hora"), show="headings")
+        self.tree_gastos.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.tree_gastos.heading("Concepto", text="Concepto")
+        self.tree_gastos.heading("Valor", text="Valor")
+        self.tree_gastos.heading("Hora", text="Hora")
+
+        self.tree_gastos.column("Concepto", width=250)
+        self.tree_gastos.column("Valor", width=150)
+        self.tree_gastos.column("Hora", width=100)
+
+        # Cargar gastos del día
+        self._cargar_gastos_hoy()
+
+        # Total del día
+        self.label_total = tk.Label(lista_frame, text="Total gastos hoy: $0 COP", 
+                                   bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+        self.label_total.pack(pady=10)
+
+    def _guardar_gasto_temporal(self):
+        """Guarda un gasto en la base de datos temporal."""
+        concepto = self.entry_concepto.get().strip()
+        valor_text = self.entry_valor.get().strip()
+
+        if not concepto or not valor_text:
+            messagebox.showwarning("⚠️ Campos vacíos", "Por favor, complete todos los campos.")
+            return
+
+        try:
+            valor = float(valor_text.replace(",", "").replace("$", ""))
+            
+            # Conectar a la base de datos y crear tabla si no existe
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            
+            # Crear tabla gastos si no existe
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS gastos (
+                    id_gasto INTEGER PRIMARY KEY AUTOINCREMENT,
+                    concepto TEXT NOT NULL,
+                    valor REAL NOT NULL,
+                    fecha TEXT NOT NULL,
+                    hora TEXT NOT NULL,
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Insertar el gasto
+            fecha_hoy = datetime.date.today().strftime('%d-%m-%Y')
+            hora_actual = datetime.datetime.now().strftime('%H:%M:%S')
+            
+            cursor.execute("""
+                INSERT INTO gastos (concepto, valor, fecha, hora)
+                VALUES (?, ?, ?, ?)
+            """, (concepto, valor, fecha_hoy, hora_actual))
+            
+            conn.commit()
+            conn.close()
+
+            # Limpiar formulario
+            self.entry_concepto.delete(0, tk.END)
+            self.entry_valor.delete(0, tk.END)
+
+            # Recargar lista
+            self._cargar_gastos_hoy()
+            
+            # Actualizar estadísticas del dashboard principal
+            self._actualizar_estadisticas()
+
+            messagebox.showinfo("✅ Gasto Guardado", f"Gasto guardado exitosamente:\n{concepto} - ${valor:,.0f}")
+
+        except ValueError:
+            messagebox.showerror("❌ Error", "El valor debe ser un número válido.")
+        except Exception as e:
+            messagebox.showerror("❌ Error", f"Error al guardar gasto: {e}")
+
+    def _cargar_gastos_hoy(self):
+        """Carga los gastos del día actual."""
+        try:
+            # Limpiar tree
+            for item in self.tree_gastos.get_children():
+                self.tree_gastos.delete(item)
+
+            conn = sqlite3.connect(ruta_db)
+            cursor = conn.cursor()
+            
+            # Verificar si existe la tabla gastos
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='gastos'
+            """)
+            
+            if cursor.fetchone():
+                fecha_hoy = datetime.date.today().strftime('%d-%m-%Y')
+                cursor.execute("""
+                    SELECT concepto, valor, hora FROM gastos
+                    WHERE fecha = ?
+                    ORDER BY hora DESC
+                """, (fecha_hoy,))
+                
+                gastos = cursor.fetchall()
+                total_dia = 0
+                
+                for concepto, valor, hora in gastos:
+                    self.tree_gastos.insert("", tk.END, values=(concepto, f"${valor:,.0f}", hora))
+                    total_dia += valor
+
+                self.label_total.config(text=f"Total gastos hoy: ${total_dia:,.0f} COP")
+            
+            conn.close()
+
+        except Exception as e:
+            print(f"Error al cargar gastos: {e}")
+
     def _accion(self, nombre):
         """Función centralizada para manejar todas las acciones de los botones."""
         # Verificar permisos aquí como un respaldo
@@ -478,18 +716,18 @@ class VmPOSDashboard(tk.Tk):
             # Diccionario para el manejo de acciones
             actions = {
                 "Ventas": self._abrir_ventas,
-                "Inventario": iniciar_inventario,
-                "Clientes": iniciar_clientes,
-                "Reportes": iniciar_reportes,
-                "Configuración": iniciar_configuracion,
-                "Usuarios": iniciar_usuarios,
-                "Gastos": lambda: messagebox.showinfo("🌸 Gastos", "Módulo de gastos en desarrollo...")
+                "Inventario": lambda: iniciar_inventario() if 'iniciar_inventario' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de inventario no está disponible."),
+                "Clientes": lambda: iniciar_clientes() if 'iniciar_clientes' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de clientes no está disponible."),
+                "Reportes": lambda: iniciar_reportes() if 'iniciar_reportes' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de reportes no está disponible."),
+                "Configuración": lambda: iniciar_configuracion() if 'iniciar_configuracion' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de configuración no está disponible."),
+                "Usuarios": lambda: iniciar_usuarios() if 'iniciar_usuarios' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de usuarios no está disponible."),
+                "Gastos": self._abrir_control_gastos
             }
             
             action = actions.get(nombre)
             if action:
                 # Actualizar estadísticas antes de abrir módulo
-                if nombre in ["Ventas", "Inventario"]:
+                if nombre in ["Ventas", "Inventario", "Gastos"]:
                     self.after(1000, self._actualizar_estadisticas)
                 action()
             else:

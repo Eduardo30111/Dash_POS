@@ -119,15 +119,26 @@ def iniciar_gastos():
         
     ventana = tk.Tk()
     ventana.title("💸 Control de Gastos - VmPOS")
-    ventana.geometry("2000x1100")
-    ventana.resizable(False, False)
+    ancho_pantalla = ventana.winfo_screenwidth()
+    alto_pantalla = ventana.winfo_screenheight()
+
+    # Definir proporción deseada (por ejemplo, 80% del ancho y 75% del alto)
+    ancho_ventana = int(ancho_pantalla * 0.8)
+    alto_ventana = int(alto_pantalla * 0.75)
+
+    # Calcular posición para centrar la ventana
+    x = (ancho_pantalla // 2) - (ancho_ventana // 2)
+    y = (alto_pantalla // 2) - (alto_ventana // 2)
+
+    # Aplicar tamaño y posición
+    ventana.geometry(f"{ancho_ventana}x{alto_ventana}+{x}+{y}")
     ventana.configure(bg="#FFE4F1")
     
     # Centrar ventana
     ventana.update_idletasks()
     x = (ventana.winfo_screenwidth() // 2) - (550)
     y = (ventana.winfo_screenheight() // 2) - (350)
-    ventana.geometry(f"2000x1100+{x}+{y}")
+    ventana.geometry(f"900x600+{x}+{y}")
 
     # Variables globales para los campos
     global concepto_var, valor_var, fecha_var, tabla
