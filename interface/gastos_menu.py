@@ -497,9 +497,30 @@ def iniciar_gastos():
     h_scrollbar = ttk.Scrollbar(table_container, orient="horizontal", command=tabla.xview)
     tabla.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-    tabla.pack(side="left", fill="both", expand=True)
-    v_scrollbar.pack(side="right", fill="y")
-    h_scrollbar.pack(side="bottom", fill="x")
+    # Grid para mejor organización
+    tabla.grid(row=0, column=0, sticky="nsew")
+    v_scrollbar.grid(row=0, column=1, sticky="ns")
+    h_scrollbar.grid(row=1, column=0, sticky="ew")
+    
+    # Configurar el grid para que se expanda
+    table_container.grid_rowconfigure(0, weight=1)
+    table_container.grid_columnconfigure(0, weight=1)
+
+    # Función para desplazamiento con el ratón
+    def on_mousewheel(event):
+        tabla.yview_scroll(int(-1*(event.delta/120)), "units")
+    
+    # Vincular el evento de la rueda del ratón a la tabla
+    tabla.bind("<MouseWheel>", on_mousewheel)
+    
+    # También vincular el evento a la barra de desplazamiento vertical
+    v_scrollbar.bind("<MouseWheel>", on_mousewheel)
+    
+    # Para Linux, necesitamos bindings adicionales
+    tabla.bind("<Button-4>", lambda e: tabla.yview_scroll(-1, "units"))
+    tabla.bind("<Button-5>", lambda e: tabla.yview_scroll(1, "units"))
+    v_scrollbar.bind("<Button-4>", lambda e: tabla.yview_scroll(-1, "units"))
+    v_scrollbar.bind("<Button-5>", lambda e: tabla.yview_scroll(1, "units"))
 
     def actualizar_tabla():
         # Limpiar tabla
