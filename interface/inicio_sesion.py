@@ -3,6 +3,7 @@
 """
 Archivo: iniciar_sesion.py
 Interfaz de inicio de sesión principal para VmPOS.
+Actualizado para usar la base de datos de usuarios.
 """
 
 import tkinter as tk
@@ -12,8 +13,25 @@ from tkinter import messagebox
 import menu_inicio
 from pantalla_carga import mostrar_carga
 
+# Importar funciones de la base de datos de usuarios
+from usuarios_db import (
+    obtener_usuario_por_credenciales, 
+    crear_tablas_iniciales,
+    inicializar_admin_default
+)
+
 # --- Variables necesarias (telefono es estático) ---
 telefono = "+573215545788"
+
+def inicializar_sistema():
+    """Inicializa el sistema de base de datos de usuarios al arrancar."""
+    try:
+        print("🔧 Inicializando sistema de autenticación...")
+        crear_tablas_iniciales()
+        inicializar_admin_default()
+        print("✅ Sistema de autenticación listo.")
+    except Exception as e:
+        print(f"❌ Error al inicializar sistema: {e}")
 
 # 🚨 Sistema de alertas personalizadas
 def mostrar_alerta_bonita(titulo, mensaje, tipo="error"):
@@ -96,7 +114,7 @@ def mostrar_alerta_bonita(titulo, mensaje, tipo="error"):
 
 def validar_campos():
     """
-    Realiza la validación de campos y autenticación.
+    Realiza la validación de campos y autenticación usando la base de datos.
     Retorna una tupla (bool, dict) donde el booleano indica si la validación
     fue exitosa y el diccionario contiene los datos del usuario si lo fue.
     """
@@ -127,23 +145,43 @@ def validar_campos():
         entry_pass.focus()
         return False, None
     
-    # --- Validar el usuario y la contraseña (lógica simplificada) ---
-    # En un entorno real, esta validación se haría contra una base de datos.
-    if (usuario.lower() == "eduardo" and clave == "2121"):
-        return True, {'usuario': usuario, 'permisos': 'admin'}
-    elif (usuario.lower() == "andres" and clave == "2180"):
-        return True, {'usuario': usuario, 'permisos': 'vendedor'}
-    else:
-        # Si no se encuentra el usuario con esas credenciales
-        user_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
-        pass_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
+    # --- Validar usando la base de datos ---
+    try:
+        print(f"🔐 Intentando autenticar usuario: {usuario}")
+        usuario_verificado = obtener_usuario_por_credenciales(usuario, clave)
+        
+        if usuario_verificado:
+            print(f"✅ Autenticación exitosa para {usuario_verificado['usuario']}")
+            # Convertir la información del usuario al formato esperado por el sistema
+            datos_usuario = {
+                'usuario': usuario_verificado['usuario'],
+                'permisos': usuario_verificado['rol'].lower(),  # admin, gerente, vendedor
+                'rol_completo': usuario_verificado['rol'],  # Administrador, Gerente, Vendedor
+                'id': usuario_verificado['id'],
+                'estado': usuario_verificado['estado']
+            }
+            return True, datos_usuario
+        else:
+            print(f"❌ Autenticación fallida para usuario: {usuario}")
+            # Si no se encuentra el usuario con esas credenciales
+            user_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
+            pass_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
+            mostrar_alerta_bonita(
+                "Credenciales incorrectas 🔒",
+                "Usuario o contraseña no coinciden.\n\n¡Verifica tus datos e inténtalo de nuevo!",
+                "error"
+            )
+            entry_user.focus()
+            entry_user.select_range(0, tk.END)
+            return False, None
+            
+    except Exception as e:
+        print(f"❌ Error durante la autenticación: {e}")
         mostrar_alerta_bonita(
-            "Credenciales incorrectas �",
-            "Usuario o contraseña no coinciden.\n\n¡Verifica tus datos e inténtalo de nuevo!",
+            "Error del sistema 🛠️",
+            "Ocurrió un error al verificar las credenciales.\n\n¡Por favor, inténtalo de nuevo!",
             "error"
         )
-        entry_user.focus()
-        entry_user.select_range(0, tk.END)
         return False, None
 
 def _iniciar_flujo_principal(datos_usuario, usuario_actual):
@@ -173,7 +211,7 @@ def validar_usuario(event=None):
     # Mostrar confirmación exitosa
     mostrar_alerta_bonita(
         "¡Bienvenida! ✨",
-        f"Hola {usuario_actual}!\n\nAcceso concedido, iniciando sistema...",
+        f"Hola {usuario_actual}!\n\nAcceso concedido como {datos_usuario['rol_completo']}\nIniciando sistema...",
         "success"
     )
     
@@ -182,7 +220,6 @@ def validar_usuario(event=None):
     # Esto evita el error de sintaxis del lambda con múltiples sentencias.
     ventana.after(1500, lambda: _iniciar_flujo_principal(datos_usuario, usuario_actual))
 
-
 def limpiar_campos():
     """Limpiar campos de entrada"""
     usuario_var.set("")
@@ -190,6 +227,25 @@ def limpiar_campos():
     user_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
     pass_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
     entry_user.focus()
+
+def mostrar_info_usuarios():
+    """Muestra información sobre usuarios disponibles (solo para desar
+    
+    lo/demo)"""
+    mensaje = """Usuarios disponibles en el sistema:
+    
+👤 admin / admin123 (Administrador)
+👤 eduardo / 2121 (Administrador) 
+👤 andres / 2180 (Vendedor)
+👤 gerente / manager (Gerente)
+
+Los usuarios se gestionan desde el menú principal."""
+    
+    mostrar_alerta_bonita(
+        "Información de Usuarios 👥",
+        mensaje,
+        "warning"
+    )
 
 def on_enter_button(event):
     event.widget.config(bg="#C2185B") # Rosa oscuro al pasar el ratón
@@ -202,6 +258,15 @@ def on_enter_clear(event):
 
 def on_leave_clear(event):
     event.widget.config(bg="#AB47BC") # Morado más suave
+
+def on_enter_info(event):
+    event.widget.config(bg="#5E35B1") # Morado más oscuro para info
+
+def on_leave_info(event):
+    event.widget.config(bg="#7E57C2") # Morado medio
+
+# Inicializar sistema al arrancar
+inicializar_sistema()
 
 # 🖼️ Ventana principal
 ventana = tk.Tk()
@@ -289,7 +354,6 @@ tk.Label(login_header, text="ACCESO AL SISTEMA", font=("Segoe UI", 16, "bold"),
 login_content = tk.Frame(right_frame, bg="white")
 login_content.pack(expand=True, fill="both", padx=40, pady=25)
 
-
 tk.Label(login_content, text="Inicia sesión para continuar ✨", 
          font=("Segoe UI", 13), bg="white", fg="#616161").pack(pady=(0, 25)) # Gris oscuro
 
@@ -319,7 +383,6 @@ entry_pass = tk.Entry(pass_frame, textvariable=pass_var, font=("Segoe UI", 13),
                       bg="#F3E5F5", bd=0, fg="#424242", show="*") # El atributo show="*" oculta los caracteres por seguridad.
 entry_pass.pack(fill="x", padx=12, pady=10)
 
-
 # Botones personalizados
 btn_login = tk.Button(login_content, text="🚀 INICIAR SESIÓN", 
                       font=("Segoe UI", 13, "bold"), bg="#E91E63", fg="white", # Rosa brillante
@@ -331,28 +394,40 @@ btn_login.pack(fill="x", pady=(0, 12))
 buttons_frame = tk.Frame(login_content, bg="white")
 buttons_frame.pack(fill="x", pady=(0, 10))
 
-btn_clear = tk.Button(buttons_frame, text="🧹 LIMPIAR", 
+# Fila superior de botones
+buttons_row1 = tk.Frame(buttons_frame, bg="white")
+buttons_row1.pack(fill="x", pady=(0, 8))
+
+btn_clear = tk.Button(buttons_row1, text="🧹 LIMPIAR", 
                       font=("Segoe UI", 10, "bold"), bg="#AB47BC", fg="white", # Morado más suave
                       bd=0, pady=8, cursor="hand2", command=limpiar_campos,
                       relief="flat")
-btn_clear.pack(expand=True, fill="x")
+btn_clear.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+btn_info = tk.Button(buttons_row1, text="👥 INFO", 
+                     font=("Segoe UI", 10, "bold"), bg="#7E57C2", fg="white", # Morado medio
+                     bd=0, pady=8, cursor="hand2", command=mostrar_info_usuarios,
+                     relief="flat")
+btn_info.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
 # Efectos hover para botones
 btn_login.bind("<Enter>", on_enter_button)
 btn_login.bind("<Leave>", on_leave_button)
 btn_clear.bind("<Enter>", on_enter_clear)
 btn_clear.bind("<Leave>", on_leave_clear)
+btn_info.bind("<Enter>", on_enter_info)
+btn_info.bind("<Leave>", on_leave_info)
 
 # Footer con información de versión
 footer_frame = tk.Frame(right_frame, bg="#AB47BC", height=70) # Morado más suave
 footer_frame.pack(side="bottom", fill="x")
 footer_frame.pack_propagate(False)
 
-tk.Label(footer_frame, text="✨ Versión Gratuita 3.1.0", 
+tk.Label(footer_frame, text="✨ Versión Gratuita 3.1.0 - Base de Datos", 
          font=("Segoe UI", 9, "bold"), bg="#AB47BC", fg="white").pack(pady=(10, 2))
 tk.Label(footer_frame, text="💎 Versión PRO disponible con lector de código", 
          font=("Segoe UI", 8), bg="#AB47BC", fg="#FFEB3B").pack() # Amarillo brillante
-tk.Label(footer_frame, text="🎯 Haz tu aporte y mejora tu sistema", 
+tk.Label(footer_frame, text="🎯 Sistema de usuarios mejorado", 
          font=("Segoe UI", 8), bg="#AB47BC", fg="#FFEB3B").pack(pady=(0, 8)) # Amarillo brillante
 
 # 🎯 Eventos de teclado

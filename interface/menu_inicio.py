@@ -48,7 +48,7 @@ if not os.path.exists(ruta_db):
 
 # Diccionario de permisos predefinidos para cada rol
 PERMISOS = {
-    "admin": {
+    "administrador": {
         "Ventas": 1,
         "Inventario": 1,
         "Clientes": 1,
@@ -65,6 +65,16 @@ PERMISOS = {
         "Gastos": 0,
         "Usuarios": 0,
         "Configuración": 0
+    },
+
+    "gerente": {
+        "Ventas": 1,
+        "Inventario": 1,
+        "Clientes": 1,
+        "Reportes": 1,
+        "Gastos": 0,
+        "Usuarios": 1,
+        "Configuración": 1
     }
 }
 
