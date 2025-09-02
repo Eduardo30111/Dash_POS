@@ -5,37 +5,59 @@ import datetime
 from tkinter import messagebox
 import sqlite3
 import os
+import sys
 
-# Importaciones de los módulos de interfaz
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, 'interface'))
+
+# Importaciones con manejo de errores
 try:
     from pantalla_carga import mostrar_carga
-except ImportError:
-    print("Warning: pantalla_carga module not found")
+except ImportError as e:
+    print(f"Warning: pantalla_carga module not found: {e}")
+    def mostrar_carga(*args, **kwargs):
+        print("Pantalla de carga no disponible")
 
 try:
     from reportes_menu import iniciar_reportes
-except ImportError:
-    print("Warning: reportes_menu module not found")
+except ImportError as e:
+    print(f"Warning: reportes_menu module not found: {e}")
+    def iniciar_reportes():
+        messagebox.showwarning("Módulo no disponible", "El módulo de reportes no está disponible.")
 
 try:
     from clientes_menu import iniciar_clientes
-except ImportError:
-    print("Warning: clientes_menu module not found")
+except ImportError as e:
+    print(f"Warning: clientes_menu module not found: {e}")
+    def iniciar_clientes():
+        messagebox.showwarning("Módulo no disponible", "El módulo de clientes no está disponible.")
 
 try:
     from configuracion_menu import iniciar_configuracion
-except ImportError:
-    print("Warning: configuracion_menu module not found")
+except ImportError as e:
+    print(f"Warning: configuracion_menu module not found: {e}")
+    def iniciar_configuracion():
+        messagebox.showwarning("Módulo no disponible", "El módulo de configuración no está disponible.")
 
 try:
     from usuarios_menu import iniciar_usuarios
-except ImportError:
-    print("Warning: usuarios_menu module not found")
+except ImportError as e:
+    print(f"Warning: usuarios_menu module not found: {e}")
+    def iniciar_usuarios():
+        messagebox.showwarning("Módulo no disponible", "El módulo de usuarios no está disponible.")
 
 try:
     from inventario_menu import iniciar_inventario
-except ImportError:
-    print("Warning: inventario_menu module not found")
+except ImportError as e:
+    print(f"Warning: inventario_menu module not found: {e}")
+    def iniciar_inventario():
+        messagebox.showwarning("Módulo no disponible", "El módulo de inventario no está disponible.")
 
 # Ruta de la base de datos
 base_dir = os.path.dirname(os.path.abspath(__file__))

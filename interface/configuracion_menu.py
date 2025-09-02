@@ -3,8 +3,22 @@ from tkinter import messagebox, filedialog
 import os
 import shutil
 import sqlite3
-import pandas as pd
+import sys
 from datetime import datetime
+
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Importación opcional de pandas
+try:
+    import pandas as pd
+    PANDAS_DISPONIBLE = True
+except ImportError:
+    print("Warning: Pandas no disponible, algunas funciones de exportación estarán limitadas")
+    PANDAS_DISPONIBLE = False
 
 def abrir_config(tipo):
     """

@@ -9,16 +9,67 @@ Actualizado para usar la base de datos de usuarios.
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-# Importar los módulos necesarios. Es crucial que no estén comentados.
-import menu_inicio
-from pantalla_carga import mostrar_carga
+import sys
+import os
 
-# Importar funciones de la base de datos de usuarios
-from usuarios_db import (
-    obtener_usuario_por_credenciales, 
-    crear_tablas_iniciales,
-    inicializar_admin_default
-)
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    # Si está ejecutándose como ejecutable
+    BASE_DIR = sys._MEIPASS
+else:
+    # Si está ejecutándose como script
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Agregar directorios al path
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, 'interface'))
+sys.path.insert(0, os.path.join(BASE_DIR, 'modules'))
+
+# Importaciones con manejo de errores
+try:
+    import menu_inicio
+except ImportError as e:
+    print(f"Error importando menu_inicio: {e}")
+    menu_inicio = None
+
+try:
+    from pantalla_carga import mostrar_carga
+except ImportError as e:
+    print(f"Error importando pantalla_carga: {e}")
+    def mostrar_carga(*args, **kwargs):
+        print("Pantalla de carga no disponible")
+
+try:
+    from usuarios_db import (
+        obtener_usuario_por_credenciales, 
+        crear_tablas_iniciales,
+        inicializar_admin_default
+    )
+except ImportError as e:
+    print(f"Error importando usuarios_db: {e}")
+    # Funciones de respaldo
+    def obtener_usuario_por_credenciales(usuario, password):
+        # Sistema de respaldo con usuarios hardcodeados
+        usuarios_respaldo = {
+            'admin': {'usuario': 'admin', 'rol': 'Administrador', 'id': 1, 'estado': 'Activo'},
+            'eduardo': {'usuario': 'eduardo', 'rol': 'Administrador', 'id': 2, 'estado': 'Activo'},
+            'andres': {'usuario': 'andres', 'rol': 'Vendedor', 'id': 3, 'estado': 'Activo'}
+        }
+        passwords_respaldo = {
+            'admin': 'admin123',
+            'eduardo': '2121',
+            'andres': '2180'
+        }
+        
+        if usuario in usuarios_respaldo and passwords_respaldo.get(usuario) == password:
+            return usuarios_respaldo[usuario]
+        return None
+    
+    def crear_tablas_iniciales():
+        print("Función crear_tablas_iniciales no disponible")
+    
+    def inicializar_admin_default():
+        print("Función inicializar_admin_default no disponible")
 
 # --- Variables necesarias (telefono es estático) ---
 telefono = "+573215545788"
