@@ -4,6 +4,7 @@ import subprocess
 import datetime
 from tkinter import messagebox
 import sqlite3
+import importlib.util
 import os
 import sys
 
@@ -57,6 +58,13 @@ try:
 except ImportError as e:
     print(f"Warning: inventario_menu module not found: {e}")
     def iniciar_inventario():
+        messagebox.showwarning("Módulo no disponible", "El módulo de inventario no está disponible.")
+
+try:
+    from inventario_menu import iniciar_GeneradorCodigoBarras
+except ImportError as e:
+    print(f"Warning: inventario_menu module not found: {e}")
+    def GeneradorCodigoBarras():
         messagebox.showwarning("Módulo no disponible", "El módulo de inventario no está disponible.")
 
 # Ruta de la base de datos
@@ -702,13 +710,12 @@ class VmPOSDashboard(tk.Tk):
             ventas_path = os.path.join(os.path.dirname(__file__), "ventas_menu.py")
             if os.path.exists(ventas_path):
                 subprocess.Popen(["python", ventas_path])
-                messagebox.showinfo("✅ Ventas", "Abriendo módulo de ventas...")
             else:
                 messagebox.showwarning("⚠️ Archivo no encontrado", f"No se encontró el archivo ventas_menu.py en:\n{ventas_path}")
         except Exception as e:
             messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de ventas:\n{e}")
 
-    def _abrir_generador_codigos_barras(self):
+    def _abrir_generador_codigo_barras(self):
         """Abre el generador de códigos de barras."""
         # Primero verificar dependencias
         if not self._verificar_dependencias_generador():
@@ -726,11 +733,11 @@ class VmPOSDashboard(tk.Tk):
                 try:
                     # Intentar cargar el módulo dinámicamente
                     current_dir = os.path.dirname(os.path.abspath(__file__))
-                    generador_path = os.path.join(current_dir, 'generador_codigos_barra.py')
+                    generador_path = os.path.join(current_dir, 'generador_codigo_barras.py')
                     
                     if not os.path.exists(generador_path):
                         messagebox.showerror("❌ Archivo No Encontrado", 
-                                           f"No se encontró el archivo 'generador_codigos_barra.py'\n\n"
+                                           f"No se encontró el archivo 'generador_codigo_barras.py'\n\n"
                                            f"Ruta esperada: {generador_path}\n\n"
                                            f"Verifica que el archivo esté en la misma carpeta que menu_inicio.py")
                         return
@@ -739,7 +746,7 @@ class VmPOSDashboard(tk.Tk):
                     if current_dir not in sys.path:
                         sys.path.insert(0, current_dir)
                         
-                    spec = importlib.util.spec_from_file_location("generador_codigos_barra", generador_path)
+                    spec = importlib.util.spec_from_file_location("generador_codigo_barras.py", generador_path)
                     if spec is None or spec.loader is None:
                         raise ImportError("No se pudo crear la especificación del módulo")
                         
@@ -754,7 +761,7 @@ class VmPOSDashboard(tk.Tk):
                                        f"No se pudo cargar el generador de códigos de barras.\n\n"
                                        f"Error: {str(load_error)}\n\n"
                                        f"Verifica que:\n"
-                                       f"1. El archivo 'generador_codigos_barra.py' exista\n"
+                                       f"1. El archivo 'generador_codigo_barras.py' exista\n"
                                        f"2. No tenga errores de sintaxis\n"
                                        f"3. Tengas PIL/Pillow instalado")
                     return
@@ -1032,7 +1039,7 @@ class VmPOSDashboard(tk.Tk):
                 "Configuración": lambda: iniciar_configuracion() if 'iniciar_configuracion' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de configuración no está disponible."),
                 "Usuarios": lambda: iniciar_usuarios() if 'iniciar_usuarios' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de usuarios no está disponible."),
                 "Gastos": self._abrir_control_gastos,
-                "Códigos de Barras": self._abrir_generador_codigos_barras
+                "Códigos de Barras": self._abrir_generador_codigo_barras
             }
             
             action = actions.get(nombre)
