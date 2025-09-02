@@ -487,7 +487,7 @@ class App:
         btn_frame.pack(pady=5)
         
         # Botón abrir caja
-        btn_abrir_caja = tk.Button(btn_frame, text="💰 ABRIR CAJA", command=self.emergencia_abrir_caja 
+        btn_abrir_caja = tk.Button(btn_frame, text="💰 ABRIR CAJA", command=self.emergencia_abrir_caja,
                                   bg="#FF4500", fg="white", font=("Arial", 9, "bold"), padx=15, pady=5)
         btn_abrir_caja.pack(side="left", padx=10)
         

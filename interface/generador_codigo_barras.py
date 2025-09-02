@@ -237,41 +237,128 @@ class GeneradorCodigoBarras:
         
         return True, "Válido"
     
-    def generar_codigo_simple(self, texto, formato):
-        """Genera un código de barras simple usando caracteres ASCII"""
-        # Esta es una representación visual simple
-        # En un entorno real, usarías una librería como python-barcode o reportlab
+    def dibujar_florecita(self, draw, x, y, tamaño=12, color='#ff7675'):
+        """Dibuja una florecita decorativa con mejor resolución"""
+        # Pétalos (círculos pequeños alrededor del centro)
+        petalos_pos = [
+            (x, y-tamaño//2),      # arriba
+            (x+tamaño//2, y),      # derecha
+            (x, y+tamaño//2),      # abajo
+            (x-tamaño//2, y),      # izquierda
+            (x-tamaño//3, y-tamaño//3),  # diagonal sup izq
+            (x+tamaño//3, y-tamaño//3),  # diagonal sup der
+            (x+tamaño//3, y+tamaño//3),  # diagonal inf der
+            (x-tamaño//3, y+tamaño//3),  # diagonal inf izq
+        ]
         
-        width = 400
-        height = 100
+        # Dibujar pétalos más grandes
+        petal_size = tamaño // 4
+        for px, py in petalos_pos:
+            draw.ellipse([px-petal_size, py-petal_size, px+petal_size, py+petal_size], fill=color)
+        
+        # Centro de la flor más grande
+        center_size = tamaño // 3
+        draw.ellipse([x-center_size, y-center_size, x+center_size, y+center_size], fill='#fdcb6e')
     
+    def generar_codigo_simple(self, texto, formato):
+        """Genera un código de barras simple en formato etiqueta pequeña con alta resolución"""
+        # Dimensiones para etiqueta pequeña con buena resolución
+        width = 600  # Ancho con buena resolución
+        height = 240  # Alto total con buena resolución
+        barcode_height = 100  # Alto del código de barras
         
-        # Crear imagen
-        img = Image.new('RGB', (width, height + 30), 'white')
+        # Crear imagen con fondo blanco y alta resolución
+        img = Image.new('RGB', (width, height), 'white')
         draw = ImageDraw.Draw(img)
         
-        # Dibujar barras simples (representación visual)
-        bar_width = 2
-        x = 20
+        # Dibujar borde de la etiqueta
+        draw.rectangle([4, 4, width-5, height-5], outline='#ddd', width=2)
         
-        # Generar patrón de barras basado en el texto
+        # === HEADER: "Variedades Marce" con florecitas ===
+        try:
+            # Cargar fuente más grande para mejor resolución
+            font_titulo = ImageFont.truetype("arial.ttf", 24)
+        except:
+            try:
+                font_titulo = ImageFont.truetype("Arial.ttf", 24)
+            except:
+                font_titulo = ImageFont.load_default()
+        
+        # Texto "Variedades Marce" centrado
+        titulo = "Variedades Marce"
+        try:
+            text_bbox = draw.textbbox((0, 0), titulo, font=font_titulo)
+            text_width = text_bbox[2] - text_bbox[0]
+        except:
+            text_width = len(titulo) * 14  # Estimación si textbbox no funciona
+        
+        text_x = (width - text_width) // 2
+        text_y = 15
+        
+        # Dibujar el título centrado
+        draw.text((text_x, text_y), titulo, fill='#2d3436', font=font_titulo)
+        
+        # Dibujar florecitas a los lados del título (mejor centradas)
+        flor_y = text_y + 12  # Centrar verticalmente con el texto
+        
+        # Florecita izquierda
+        flor_izq_x = text_x - 35
+        self.dibujar_florecita(draw, flor_izq_x, flor_y, tamaño=12, color='#ff7675')
+        
+        # Florecita derecha
+        flor_der_x = text_x + text_width + 25
+        self.dibujar_florecita(draw, flor_der_x, flor_y, tamaño=12, color='#ff7675')
+        
+        # === CÓDIGO DE BARRAS CENTRADO ===
+        barcode_start_y = 55
+        bar_width = 3  # Barras más anchas para mejor resolución
+        
+        # Calcular el ancho total del código de barras
+        total_bars = 0
+        for char in texto:
+            char_code = ord(char) % 10
+            total_bars += char_code + 1
+        
+        barcode_width = total_bars * (bar_width + 1)
+        start_x = (width - barcode_width) // 2  # Centrar el código de barras
+        
+        x = start_x
+        # Generar patrón de barras centrado
         for i, char in enumerate(texto):
             char_code = ord(char) % 10
             for j in range(char_code + 1):
                 if (i + j) % 2 == 0:
-                    draw.rectangle([x, 10, x + bar_width, height], fill='black')
+                    draw.rectangle([x, barcode_start_y, x + bar_width, 
+                                  barcode_start_y + barcode_height], fill='black')
                 x += bar_width + 1
+                
+                # Evitar que el código se salga del área
+                if x > width - 30:
+                    break
+            if x > width - 30:
+                break
         
-        # Agregar texto si está habilitado
+        # === TEXTO DEBAJO DEL CÓDIGO CENTRADO ===
         if self.mostrar_texto.get():
             try:
-                font = ImageFont.load_default()
+                font_codigo = ImageFont.truetype("arial.ttf", 18)
             except:
-                font = None
+                try:
+                    font_codigo = ImageFont.truetype("Arial.ttf", 18)
+                except:
+                    font_codigo = ImageFont.load_default()
             
-            text_width = draw.textlength(texto, font=font) if hasattr(draw, 'textlength') else len(texto) * 8
-            text_x = (width - text_width) // 6
-            draw.text((text_x, height + 5), texto, fill='black', font=font)
+            # Centrar el texto del código
+            try:
+                codigo_bbox = draw.textbbox((0, 0), texto, font=font_codigo)
+                codigo_width = codigo_bbox[2] - codigo_bbox[0]
+            except:
+                codigo_width = len(texto) * 10  # Estimación
+            
+            codigo_x = (width - codigo_width) // 2
+            codigo_y = barcode_start_y + barcode_height + 15
+            
+            draw.text((codigo_x, codigo_y), texto, fill='#2d3436', font=font_codigo)
         
         return img
     
@@ -291,20 +378,20 @@ class GeneradorCodigoBarras:
             return
         
         try:
-            # Generar código de barras
+            # Generar código de barras en formato etiqueta
             self.codigo_generado = self.generar_codigo_simple(texto, formato)
             
             # Mostrar en canvas
             self.mostrar_en_canvas(self.codigo_generado)
             
             # Actualizar información
-            self.lbl_info.config(text=f"Código: {texto} | Formato: {formato} | Estado: Generado ✅")
+            self.lbl_info.config(text=f"Etiqueta: {texto} | Formato: {formato} | Variedades Marce ✅")
             
             # Habilitar botones
             self.btn_guardar.config(state="normal")
             self.btn_imprimir.config(state="normal")
             
-            messagebox.showinfo("✅ Éxito", "¡Código de barras generado exitosamente!")
+            messagebox.showinfo("✅ Éxito", "¡Etiqueta con código de barras generada exitosamente!")
             
         except Exception as e:
             messagebox.showerror("❌ Error", f"Error al generar código: {str(e)}")
@@ -315,7 +402,6 @@ class GeneradorCodigoBarras:
         self.canvas.delete("all")
         
         # Convertir PIL Image a PhotoImage
-        # Redimensionar si es necesario
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
         
@@ -323,16 +409,17 @@ class GeneradorCodigoBarras:
             canvas_width = 400
             canvas_height = 200
         
-        # Redimensionar imagen manteniendo aspecto
+        # Redimensionar imagen manteniendo aspecto para visualización (sin afectar calidad original)
         img_width, img_height = imagen.size
-        ratio = min(canvas_width / img_width, (canvas_height - 40) / img_height)
+        ratio = min((canvas_width - 40) / img_width, (canvas_height - 40) / img_height)
         new_width = int(img_width * ratio)
         new_height = int(img_height * ratio)
         
-        imagen_redimensionada = imagen.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        # Solo redimensionar para mostrar, pero mantener original para guardar
+        imagen_para_mostrar = imagen.resize((new_width, new_height), Image.Resampling.LANCZOS)
         
         # Convertir a PhotoImage
-        self.photo = tk.PhotoImage(data=self.pil_to_base64(imagen_redimensionada))
+        self.photo = tk.PhotoImage(data=self.pil_to_base64(imagen_para_mostrar))
         
         # Centrar en canvas
         x = canvas_width // 2
@@ -359,9 +446,14 @@ class GeneradorCodigoBarras:
             messagebox.showwarning("⚠️ Sin código", "Primero debes generar un código de barras.")
             return
         
+        # Sugerir nombre con "Variedades_Marce"
+        texto_codigo = self.entry_codigo.get().strip()
+        nombre_sugerido = f"Etiqueta_Variedades_Marce_{texto_codigo}.png"
+        
         # Diálogo para guardar archivo
         filename = filedialog.asksaveasfilename(
-            title="Guardar código de barras",
+            title="Guardar etiqueta con código de barras",
+            initialvalue=nombre_sugerido,
             defaultextension=".png",
             filetypes=[("Archivos PNG", "*.png"), ("Todos los archivos", "*.*")]
         )
@@ -369,7 +461,7 @@ class GeneradorCodigoBarras:
         if filename:
             try:
                 self.codigo_generado.save(filename)
-                messagebox.showinfo("✅ Guardado", f"Código de barras guardado en:\n{filename}")
+                messagebox.showinfo("✅ Guardado", f"Etiqueta guardada en:\n{filename}")
             except Exception as e:
                 messagebox.showerror("❌ Error", f"Error al guardar archivo:\n{str(e)}")
     

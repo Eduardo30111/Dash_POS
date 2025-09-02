@@ -3,8 +3,22 @@ from tkinter import messagebox, filedialog
 import os
 import shutil
 import sqlite3
-import pandas as pd
+import sys
 from datetime import datetime
+
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Importación opcional de pandas
+try:
+    import pandas as pd
+    PANDAS_DISPONIBLE = True
+except ImportError:
+    print("Warning: Pandas no disponible, algunas funciones de exportación estarán limitadas")
+    PANDAS_DISPONIBLE = False
 
 def abrir_config(tipo):
     """
@@ -37,6 +51,555 @@ def obtener_tablas_db(db_path):
     except Exception as e:
         print(f"Error al obtener tablas: {e}")
         return []
+
+def verificar_integridad_db(db_path):
+    """
+    Verifica la integridad de la base de datos antes de realizar operaciones críticas.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Verificar integridad
+        cursor.execute("PRAGMA integrity_check;")
+        resultado = cursor.fetchone()[0]
+        
+        conn.close()
+        return resultado == "ok"
+    except Exception as e:
+        print(f"Error verificando integridad: {e}")
+        return False
+
+def restaurar_base_datos():
+    """
+    Elimina todos los datos de todas las tablas en la base de datos ventas.db
+    con verificaciones de seguridad mejoradas.
+    """
+    db_path = "ventas.db"
+    
+    # Verificar si existe la base de datos
+    if not os.path.exists(db_path):
+        messagebox.showerror("❌ Error", 
+                           f"La base de datos '{db_path}' no existe.\n"
+                           f"Ubicación buscada: {os.path.abspath(db_path)}\n"
+                           "Verifica la ubicación del archivo.")
+        return
+    
+    # Verificar integridad antes de continuar
+    if not verificar_integridad_db(db_path):
+        messagebox.showerror("❌ Error de Integridad", 
+                           "La base de datos parece estar corrupta.\n"
+                           "Por seguridad, no se realizará la restauración.\n"
+                           "Intenta reparar la base de datos primero.")
+        return
+    
+    # Obtener información de las tablas
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Obtener tablas de usuario
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tablas_disponibles = [tabla[0] for tabla in cursor.fetchall()]
+        
+        # Contar registros totales
+        total_registros = 0
+        info_tablas = []
+        
+        for tabla in tablas_disponibles:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
+                count = cursor.fetchone()[0]
+                total_registros += count
+                info_tablas.append(f"• {tabla}: {count} registros")
+            except Exception as e:
+                info_tablas.append(f"• {tabla}: Error al contar")
+        
+        conn.close()
+        
+        if not tablas_disponibles:
+            messagebox.showwarning("⚠️ Advertencia", 
+                                 f"No se encontraron tablas en la base de datos.\n"
+                                 f"La base de datos podría estar vacía.\n\n"
+                                 f"Usa el 🔧 Diagnóstico para más información.")
+            return
+            
+    except Exception as e:
+        messagebox.showerror("❌ Error", 
+                           f"No se puede leer la base de datos:\n{str(e)}")
+        return
+    
+    # Mostrar diálogo de confirmación detallado
+    info_texto = "\n".join(info_tablas)
+    respuesta = messagebox.askyesno(
+        "💖 Restaurar Base de Datos",
+        f"¿ESTÁS SEGURA de que deseas ELIMINAR todos los datos?\n\n"
+        f"📊 RESUMEN DE DATOS A ELIMINAR:\n"
+        f"📋 Tablas encontradas: {len(tablas_disponibles)}\n"
+        f"📈 Total de registros: {total_registros}\n\n"
+        f"DETALLES:\n{info_texto}\n\n"
+        f"⚠️ ESTA ACCIÓN NO SE PUEDE DESHACER\n"
+        f"✅ Se creará un backup automático antes de continuar\n\n"
+        f"¿Continuar con la restauración?"
+    )
+    
+    if not respuesta:
+        return
+    
+    # Segunda confirmación para operaciones críticas
+    if total_registros > 100:  # Si hay muchos registros, pedir confirmación adicional
+        confirmacion_final = messagebox.askyesno(
+            "🚨 CONFIRMACIÓN FINAL",
+            f"⚠️ ÚLTIMA ADVERTENCIA ⚠️\n\n"
+            f"Vas a eliminar {total_registros} registros permanentemente.\n\n"
+            f"¿Estás COMPLETAMENTE SEGURA?\n"
+            f"Escribe 'SI' mentalmente y confirma.",
+            icon="warning"
+        )
+        
+        if not confirmacion_final:
+            messagebox.showinfo("✅ Operación Cancelada", 
+                              "La restauración ha sido cancelada.\n"
+                              "Tus datos están seguros.")
+            return
+    
+    conn = None
+    try:
+        # Crear backup automático antes de restaurar
+        fecha_backup = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"backup_antes_restaurar_{fecha_backup}.db"
+        backup_dir = "./backups"
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, backup_name)
+        
+        # Crear backup
+        shutil.copy2(db_path, backup_path)
+        
+        # Verificar que el backup se creó correctamente
+        if not os.path.exists(backup_path):
+            raise Exception("No se pudo crear el backup de seguridad")
+        
+        # Conectar a la base de datos
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA foreign_keys = OFF")  # Deshabilitar foreign keys temporalmente
+        cursor = conn.cursor()
+        
+        # Comenzar transacción
+        cursor.execute("BEGIN TRANSACTION;")
+        
+        # Obtener todas las tablas nuevamente
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tablas = [tabla[0] for tabla in cursor.fetchall()]
+        
+        tablas_resultado = []
+        total_eliminados = 0
+        errores = []
+        
+        # Eliminar datos de cada tabla
+        for tabla in tablas:
+            try:
+                # Contar registros antes de eliminar
+                cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
+                registros_antes = cursor.fetchone()[0]
+                
+                # Eliminar todos los datos de la tabla
+                cursor.execute(f"DELETE FROM [{tabla}]")
+                
+                # Verificar eliminación
+                cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
+                registros_despues = cursor.fetchone()[0]
+                
+                eliminados = registros_antes - registros_despues
+                total_eliminados += eliminados
+                
+                if registros_despues == 0:
+                    tablas_resultado.append(f"✅ {tabla}: {registros_antes} registros eliminados")
+                else:
+                    tablas_resultado.append(f"⚠️ {tabla}: {eliminados} eliminados, {registros_despues} restantes")
+                        
+            except Exception as e:
+                error_msg = f"❌ {tabla}: Error - {str(e)}"
+                tablas_resultado.append(error_msg)
+                errores.append(error_msg)
+        
+        # Resetear secuencias de autoincrement
+        try:
+            cursor.execute("DELETE FROM sqlite_sequence")
+            cursor.execute("UPDATE sqlite_sequence SET seq = 0")
+        except Exception as e:
+            print(f"Info: No se pudo resetear sqlite_sequence: {e}")
+        
+        # Si hay errores críticos, hacer rollback
+        if len(errores) > len(tablas) / 2:  # Si más del 50% falló
+            conn.rollback()
+            raise Exception(f"Demasiados errores durante la eliminación: {len(errores)} de {len(tablas)} tablas fallaron")
+        
+        # Confirmar cambios
+        conn.commit()
+        
+        # Ejecutar VACUUM para optimizar la base de datos
+        try:
+            cursor.execute("VACUUM")
+        except Exception as e:
+            print(f"Info: No se pudo ejecutar VACUUM: {e}")
+        
+        conn.close()
+        conn = None
+        
+        # Verificar el resultado final
+        conn_verify = sqlite3.connect(db_path)
+        cursor_verify = conn_verify.cursor()
+        
+        registros_finales = 0
+        for tabla in tablas:
+            try:
+                cursor_verify.execute(f"SELECT COUNT(*) FROM [{tabla}]")
+                count = cursor_verify.fetchone()[0]
+                registros_finales += count
+            except:
+                pass
+        
+        conn_verify.close()
+        
+        # Mostrar resultados detallados
+        mostrar_resultado_restauracion(tablas_resultado, total_eliminados, registros_finales, backup_name, errores)
+        
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except:
+                pass
+        
+        messagebox.showerror("❌ Error Crítico", 
+                            f"No se pudo completar la restauración:\n\n"
+                            f"Error: {str(e)}\n"
+                            f"Tipo: {type(e).__name__}\n\n"
+                            f"La base de datos no ha sido modificada.\n"
+                            f"Tus datos están seguros.")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+
+def mostrar_resultado_restauracion(tablas_resultado, total_eliminados, registros_finales, backup_name, errores):
+    """
+    Muestra una ventana detallada con los resultados de la restauración.
+    """
+    resultado_window = tk.Toplevel()
+    resultado_window.title("✅ Resultado de la Restauración")
+    resultado_window.geometry("700x500")
+    resultado_window.configure(bg="#FFE4F1")
+    resultado_window.resizable(True, True)
+    resultado_window.grab_set()  # Modal
+    
+    main_frame = tk.Frame(resultado_window, bg="#FFE4F1")
+    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Título con estado
+    if registros_finales == 0 and not errores:
+        titulo = "✅ RESTAURACIÓN COMPLETADA EXITOSAMENTE"
+        color_titulo = "#32CD32"
+    elif registros_finales == 0 and errores:
+        titulo = "⚠️ RESTAURACIÓN COMPLETADA CON ADVERTENCIAS"
+        color_titulo = "#FF8C00"
+    else:
+        titulo = "❌ RESTAURACIÓN INCOMPLETA"
+        color_titulo = "#FF6347"
+    
+    title_label = tk.Label(main_frame, text=titulo, 
+                          font=("Segoe UI", 16, "bold"), 
+                          bg="#FFE4F1", fg=color_titulo)
+    title_label.pack(pady=(0, 15))
+    
+    # Información resumida
+    fecha_actual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    resumen_text = (f"🕐 Fecha: {fecha_actual}\n"
+                   f"📊 Registros eliminados: {total_eliminados}\n"
+                   f"📊 Registros restantes: {registros_finales}\n"
+                   f"💾 Backup creado: {backup_name}\n"
+                   f"⚠️ Errores: {len(errores)}")
+    
+    resumen_label = tk.Label(main_frame, text=resumen_text, 
+                           font=("Segoe UI", 11), 
+                           bg="#FFE4F1", fg="#333333", justify="left")
+    resumen_label.pack(pady=(0, 15))
+    
+    # Detalles por tabla en texto scrollable
+    details_label = tk.Label(main_frame, text="📋 DETALLES POR TABLA:", 
+                           font=("Segoe UI", 12, "bold"), 
+                           bg="#FFE4F1", fg="#FF1493")
+    details_label.pack(anchor="w", pady=(0, 5))
+    
+    text_frame = tk.Frame(main_frame, bg="#FFE4F1")
+    text_frame.pack(fill="both", expand=True)
+    
+    scrollbar = tk.Scrollbar(text_frame)
+    scrollbar.pack(side="right", fill="y")
+    
+    text_widget = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
+                         font=("Consolas", 10), bg="white", fg="#333333",
+                         relief="solid", bd=1)
+    text_widget.pack(fill="both", expand=True)
+    scrollbar.config(command=text_widget.yview)
+    
+    detalles_texto = "\n".join(tablas_resultado)
+    if errores:
+        detalles_texto += "\n\n❌ ERRORES ENCONTRADOS:\n" + "\n".join(errores)
+    
+    text_widget.insert("1.0", detalles_texto)
+    text_widget.config(state="disabled")
+    
+    # Botones
+    buttons_frame = tk.Frame(main_frame, bg="#FFE4F1")
+    buttons_frame.pack(pady=(15, 0))
+    
+    # Botón cerrar
+    close_btn = tk.Button(buttons_frame, text="✅ Aceptar", command=resultado_window.destroy,
+                         bg="#32CD32", fg="white", font=("Segoe UI", 12, "bold"),
+                         padx=20, pady=10)
+    close_btn.pack(side="left", padx=(0, 10))
+    
+    # Botón para abrir carpeta de backups
+    def abrir_carpeta_backup():
+        try:
+            backup_dir = os.path.abspath("./backups")
+            if os.path.exists(backup_dir):
+                os.startfile(backup_dir)  # Windows
+            else:
+                messagebox.showinfo("📁", f"Carpeta de backups:\n{backup_dir}")
+        except:
+            messagebox.showinfo("📁", f"Carpeta de backups:\n{os.path.abspath('./backups')}")
+    
+    backup_btn = tk.Button(buttons_frame, text="📁 Ver Backups", command=abrir_carpeta_backup,
+                          bg="#4169E1", fg="white", font=("Segoe UI", 12, "bold"),
+                          padx=20, pady=10)
+    backup_btn.pack(side="left")
+
+def crear_backup():
+    """
+    Crea una copia de seguridad completa de la base de datos ventas.db
+    con verificaciones mejoradas y opciones avanzadas.
+    """
+    db_path = "ventas.db"
+    
+    # Verificar si existe la base de datos
+    if not os.path.exists(db_path):
+        messagebox.showerror("❌ Error", 
+                           f"La base de datos '{db_path}' no existe.\n"
+                           f"Ubicación buscada: {os.path.abspath(db_path)}\n"
+                           "No se puede crear el backup.")
+        return
+    
+    # Verificar integridad de la base de datos
+    if not verificar_integridad_db(db_path):
+        respuesta = messagebox.askyesno("⚠️ Advertencia de Integridad",
+                                       "La base de datos podría tener problemas de integridad.\n"
+                                       "El backup se puede crear, pero podría no ser confiable.\n\n"
+                                       "¿Deseas continuar con el backup?")
+        if not respuesta:
+            return
+    
+    try:
+        # Obtener información de la base de datos antes del backup
+        file_size = os.path.getsize(db_path)
+        size_mb = round(file_size / 1024 / 1024, 2)
+        
+        tablas = obtener_tablas_db(db_path)
+        num_tablas = len([t for t in tablas if t != 'sqlite_sequence'])
+        
+        # Contar registros totales
+        total_registros = 0
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            for tabla in tablas:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
+                    count = cursor.fetchone()[0]
+                    total_registros += count
+                except:
+                    pass
+            
+            conn.close()
+        except:
+            total_registros = "Desconocido"
+        
+        # Crear directorio de backups si no existe
+        backup_dir = "./backups"
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Generar nombre del backup con fecha y hora
+        fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nombre_backup = f"backup_vmpos_{fecha}.db"
+        backup_path = os.path.join(backup_dir, nombre_backup)
+        
+        # Mostrar progreso (simulado)
+        progress_window = tk.Toplevel()
+        progress_window.title("💾 Creando Backup...")
+        progress_window.geometry("400x200")
+        progress_window.configure(bg="#FFE4F1")
+        progress_window.resizable(False, False)
+        progress_window.grab_set()
+        
+        # Centrar ventana de progreso
+        progress_window.update_idletasks()
+        x = (progress_window.winfo_screenwidth() // 2) - 200
+        y = (progress_window.winfo_screenheight() // 2) - 100
+        progress_window.geometry(f"400x200+{x}+{y}")
+        
+        progress_frame = tk.Frame(progress_window, bg="#FFE4F1")
+        progress_frame.pack(expand=True, fill="both", padx=30, pady=30)
+        
+        tk.Label(progress_frame, text="💾 Creando Backup...", 
+                font=("Segoe UI", 14, "bold"), bg="#FFE4F1", fg="#FF1493").pack(pady=20)
+        
+        progress_label = tk.Label(progress_frame, text="Iniciando...", 
+                                font=("Segoe UI", 10), bg="#FFE4F1", fg="#666666")
+        progress_label.pack(pady=10)
+        
+        # Actualizar interfaz
+        progress_window.update()
+        
+        # Paso 1: Verificar espacio disponible
+        progress_label.config(text="Verificando espacio disponible...")
+        progress_window.update()
+        
+        # Obtener espacio libre en disco
+        try:
+            stat = shutil.disk_usage(backup_dir)
+            espacio_libre = stat.free / 1024 / 1024  # MB
+            
+            if espacio_libre < size_mb * 2:  # Necesitamos al menos el doble del tamaño
+                progress_window.destroy()
+                messagebox.showerror("❌ Espacio Insuficiente",
+                                   f"No hay suficiente espacio en disco.\n"
+                                   f"Espacio necesario: ~{size_mb * 2:.1f} MB\n"
+                                   f"Espacio disponible: {espacio_libre:.1f} MB")
+                return
+        except:
+            pass  # Si no se puede verificar, continuar
+        
+        # Paso 2: Crear el backup
+        progress_label.config(text="Copiando base de datos...")
+        progress_window.update()
+        
+        # Crear el backup usando copy2 para preservar metadatos
+        shutil.copy2(db_path, backup_path)
+        
+        # Paso 3: Verificar integridad del backup
+        progress_label.config(text="Verificando backup...")
+        progress_window.update()
+        
+        backup_valido = verificar_integridad_db(backup_path)
+        
+        # Obtener información del backup creado
+        backup_size = os.path.getsize(backup_path)
+        backup_size_mb = round(backup_size / 1024 / 1024, 2)
+        
+        progress_window.destroy()
+        
+        # Mostrar resultado detallado
+        if backup_valido:
+            icono_estado = "✅"
+            estado = "EXITOSO"
+            color_estado = "#32CD32"
+            mensaje_extra = "El backup se creó correctamente y pasó la verificación de integridad."
+        else:
+            icono_estado = "⚠️"
+            estado = "CON ADVERTENCIAS"
+            color_estado = "#FF8C00"
+            mensaje_extra = "El backup se creó pero hay advertencias de integridad."
+        
+        # Ventana de resultado personalizada
+        resultado_window = tk.Toplevel()
+        resultado_window.title(f"{icono_estado} Backup {estado}")
+        resultado_window.geometry("500x400")
+        resultado_window.configure(bg="#FFE4F1")
+        resultado_window.resizable(False, False)
+        resultado_window.grab_set()
+        
+        # Centrar ventana
+        resultado_window.update_idletasks()
+        x = (resultado_window.winfo_screenwidth() // 2) - 250
+        y = (resultado_window.winfo_screenheight() // 2) - 200
+        resultado_window.geometry(f"500x400+{x}+{y}")
+        
+        main_frame = tk.Frame(resultado_window, bg="#FFE4F1")
+        main_frame.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        # Título
+        title_label = tk.Label(main_frame, text=f"{icono_estado} BACKUP {estado}", 
+                              font=("Segoe UI", 16, "bold"), 
+                              bg="#FFE4F1", fg=color_estado)
+        title_label.pack(pady=(0, 20))
+        
+        # Información del backup
+        info_frame = tk.Frame(main_frame, bg="white", relief="solid", bd=1)
+        info_frame.pack(fill="x", pady=(0, 20))
+        
+        info_content = tk.Frame(info_frame, bg="white")
+        info_content.pack(fill="both", expand=True, padx=20, pady=15)
+        
+        # Detalles del backup
+        detalles = [
+            ("📁 Archivo:", nombre_backup),
+            ("📅 Fecha:", datetime.now().strftime('%d/%m/%Y %H:%M:%S')),
+            ("💾 Tamaño:", f"{backup_size_mb} MB"),
+            ("📋 Tablas:", str(num_tablas)),
+            ("📊 Registros:", str(total_registros)),
+            ("✅ Estado:", "Verificado" if backup_valido else "Con advertencias"),
+            ("📂 Ubicación:", os.path.dirname(backup_path))
+        ]
+        
+        for i, (etiqueta, valor) in enumerate(detalles):
+            detail_frame = tk.Frame(info_content, bg="white")
+            detail_frame.pack(fill="x", pady=2)
+            
+            tk.Label(detail_frame, text=etiqueta, font=("Segoe UI", 10, "bold"),
+                    bg="white", fg="#666666").pack(side="left")
+            tk.Label(detail_frame, text=valor, font=("Segoe UI", 10),
+                    bg="white", fg="#333333").pack(side="left", padx=(10, 0))
+        
+        # Mensaje adicional
+        tk.Label(main_frame, text=mensaje_extra, font=("Segoe UI", 10),
+                bg="#FFE4F1", fg="#666666", wraplength=440, justify="center").pack(pady=(0, 20))
+        
+        # Botones
+        buttons_frame = tk.Frame(main_frame, bg="#FFE4F1")
+        buttons_frame.pack(fill="x")
+        
+        # Botón aceptar
+        accept_btn = tk.Button(buttons_frame, text="✅ Aceptar", 
+                              command=resultado_window.destroy,
+                              bg=color_estado, fg="white", 
+                              font=("Segoe UI", 12, "bold"),
+                              padx=20, pady=10)
+        accept_btn.pack(side="right")
+        
+        # Botón abrir carpeta
+        def abrir_carpeta():
+            try:
+                backup_dir_abs = os.path.abspath(backup_dir)
+                os.startfile(backup_dir_abs)
+            except:
+                messagebox.showinfo("📁 Ubicación", f"Carpeta de backups:\n{os.path.abspath(backup_dir)}")
+        
+        folder_btn = tk.Button(buttons_frame, text="📁 Abrir Carpeta", 
+                              command=abrir_carpeta,
+                              bg="#4169E1", fg="white", 
+                              font=("Segoe UI", 12, "bold"),
+                              padx=20, pady=10)
+        folder_btn.pack(side="right", padx=(0, 10))
+    
+    except Exception as e:
+        messagebox.showerror("❌ Error", 
+                           f"No se pudo crear el backup:\n\n{str(e)}\n\n"
+                           f"Tipo de error: {type(e).__name__}")
 
 def diagnosticar_base_datos():
     """
@@ -158,229 +721,6 @@ def diagnosticar_base_datos():
         
     except Exception as e:
         messagebox.showerror("❌ Error", f"Error al diagnosticar la base de datos:\n{str(e)}\n\nTipo: {type(e).__name__}")
-
-def restaurar_base_datos():
-    """
-    Elimina todos los datos de todas las tablas en la base de datos ventas.db
-    """
-    db_path = "ventas.db"
-    
-    # Verificar si existe la base de datos
-    if not os.path.exists(db_path):
-        messagebox.showerror("❌ Error", 
-                           f"La base de datos '{db_path}' no existe.\n"
-                           f"Ubicación buscada: {os.path.abspath(db_path)}\n"
-                           "Verifica la ubicación del archivo.")
-        return
-    
-    # Primero mostrar qué tablas se van a limpiar
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-        tablas_disponibles = [tabla[0] for tabla in cursor.fetchall()]
-        conn.close()
-        
-        if not tablas_disponibles:
-            messagebox.showwarning("⚠️ Advertencia", 
-                                 f"No se encontraron tablas en la base de datos.\n"
-                                 f"La base de datos podría estar vacía o corrupta.\n\n"
-                                 f"Usa el 🔧 Diagnóstico para más información.")
-            return
-            
-    except Exception as e:
-        messagebox.showerror("❌ Error", 
-                           f"No se puede leer la base de datos:\n{str(e)}")
-        return
-    
-    respuesta = messagebox.askyesno(
-        "💖 Restaurar Base de Datos",
-        f"¿Estás segura de que deseas restaurar la base de datos?\n\n"
-        f"📋 Se encontraron {len(tablas_disponibles)} tablas:\n"
-        f"• {', '.join(tablas_disponibles)}\n\n"
-        f"⚠️ Esta acción eliminará todos los datos actuales.\n"
-        f"✨ Se creará un backup automáticamente.\n\n"
-        f"Esta acción NO se puede deshacer."
-    )
-    
-    if respuesta:
-        conn = None
-        try:
-            # Crear backup automático antes de restaurar
-            fecha_backup = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_name = f"backup_antes_restaurar_{fecha_backup}.db"
-            backup_dir = "./backups"
-            os.makedirs(backup_dir, exist_ok=True)
-            backup_path = os.path.join(backup_dir, backup_name)
-            shutil.copy2(db_path, backup_path)
-            
-            # Conectar a la base de datos
-            conn = sqlite3.connect(db_path)
-            conn.execute("PRAGMA foreign_keys = OFF")  # Deshabilitar foreign keys
-            cursor = conn.cursor()
-            
-            # Obtener todas las tablas nuevamente
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-            tablas = [tabla[0] for tabla in cursor.fetchall()]
-            
-            tablas_resultado = []
-            total_registros_antes = 0
-            total_registros_despues = 0
-            
-            # Contar registros antes
-            for tabla in tablas:
-                try:
-                    cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
-                    count = cursor.fetchone()[0]
-                    total_registros_antes += count
-                except Exception as e:
-                    print(f"Error contando en {tabla}: {e}")
-            
-            # Eliminar datos de cada tabla
-            for tabla in tablas:
-                try:
-                    # Contar registros antes de eliminar
-                    cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
-                    registros_antes = cursor.fetchone()[0]
-                    
-                    # Eliminar datos
-                    cursor.execute(f"DELETE FROM [{tabla}]")
-                    
-                    # Verificar eliminación
-                    cursor.execute(f"SELECT COUNT(*) FROM [{tabla}]")
-                    registros_despues = cursor.fetchone()[0]
-                    
-                    if registros_despues == 0:
-                        tablas_resultado.append(f"✅ {tabla}: {registros_antes} → 0")
-                    else:
-                        tablas_resultado.append(f"⚠️ {tabla}: {registros_antes} → {registros_despues}")
-                    
-                    total_registros_despues += registros_despues
-                        
-                except Exception as e:
-                    tablas_resultado.append(f"❌ {tabla}: Error - {str(e)}")
-            
-            # Resetear secuencias de autoincrement
-            try:
-                cursor.execute("DELETE FROM sqlite_sequence")
-            except Exception as e:
-                print(f"Info: No se pudo resetear sqlite_sequence: {e}")
-            
-            # Confirmar cambios
-            conn.commit()
-            
-            # Ejecutar VACUUM para limpiar la base de datos
-            try:
-                cursor.execute("VACUUM")
-            except Exception as e:
-                print(f"Info: No se pudo ejecutar VACUUM: {e}")
-            
-            conn.close()
-            conn = None
-            
-            # Mostrar resultados detallados
-            resultado_window = tk.Toplevel()
-            resultado_window.title("✅ Resultado de la Restauración")
-            resultado_window.geometry("600x400")
-            resultado_window.configure(bg="#FFE4F1")
-            
-            main_frame = tk.Frame(resultado_window, bg="#FFE4F1")
-            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-            
-            title_label = tk.Label(main_frame, text="✅ RESTAURACIÓN COMPLETADA", 
-                                  font=("Segoe UI", 16, "bold"), 
-                                  bg="#FFE4F1", fg="#32CD32")
-            title_label.pack(pady=(0, 15))
-            
-            # Información resumida
-            resumen_text = (f"📊 Registros eliminados: {total_registros_antes - total_registros_despues}\n"
-                           f"📊 Registros restantes: {total_registros_despues}\n"
-                           f"💾 Backup: {backup_name}\n")
-            
-            resumen_label = tk.Label(main_frame, text=resumen_text, 
-                                   font=("Segoe UI", 11), 
-                                   bg="#FFE4F1", fg="#333333", justify="left")
-            resumen_label.pack(pady=(0, 15))
-            
-            # Detalles por tabla
-            text_frame = tk.Frame(main_frame, bg="#FFE4F1")
-            text_frame.pack(fill="both", expand=True)
-            
-            scrollbar = tk.Scrollbar(text_frame)
-            scrollbar.pack(side="right", fill="y")
-            
-            text_widget = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
-                                 font=("Consolas", 10), bg="white", fg="#333333")
-            text_widget.pack(fill="both", expand=True)
-            scrollbar.config(command=text_widget.yview)
-            
-            detalles_texto = "DETALLES POR TABLA:\n\n" + "\n".join(tablas_resultado)
-            text_widget.insert("1.0", detalles_texto)
-            text_widget.config(state="disabled")
-            
-            # Botón cerrar
-            close_btn = tk.Button(main_frame, text="✅ Aceptar", command=resultado_window.destroy,
-                                 bg="#32CD32", fg="white", font=("Segoe UI", 12, "bold"),
-                                 padx=20, pady=10)
-            close_btn.pack(pady=(15, 0))
-        
-        except Exception as e:
-            if conn:
-                conn.rollback()
-                conn.close()
-            messagebox.showerror("❌ Error", 
-                                f"No se pudo restaurar la base de datos:\n{str(e)}\n\n"
-                                f"Tipo de error: {type(e).__name__}\n"
-                                f"Ubicación: {os.path.abspath(db_path)}")
-        finally:
-            if conn:
-                conn.close()
-
-def crear_backup():
-    """
-    Crea una copia de seguridad completa de la base de datos ventas.db
-    """
-    db_path = "ventas.db"
-    
-    # Verificar si existe la base de datos
-    if not os.path.exists(db_path):
-        messagebox.showerror("❌ Error", 
-                           f"La base de datos '{db_path}' no existe.\n"
-                           "No se puede crear el backup.")
-        return
-    
-    try:
-        # Crear directorio de backups si no existe
-        backup_dir = "./backups"
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        # Generar nombre del backup con fecha y hora
-        fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nombre_backup = f"backup_vmpos_{fecha}.db"
-        backup_path = os.path.join(backup_dir, nombre_backup)
-        
-        # Crear el backup
-        shutil.copy2(db_path, backup_path)
-        
-        # Obtener información del archivo
-        file_size = os.path.getsize(backup_path)
-        size_mb = round(file_size / 1024 / 1024, 2)
-        
-        # Obtener número de tablas
-        tablas = obtener_tablas_db(db_path)
-        num_tablas = len([t for t in tablas if t != 'sqlite_sequence'])
-        
-        messagebox.showinfo("✅ Backup Creado", 
-                          f"🌸 ¡Backup creado exitosamente!\n\n"
-                          f"📁 Archivo: {nombre_backup}\n"
-                          f"📅 Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-                          f"📊 Tamaño: {size_mb} MB\n"
-                          f"📋 Tablas incluidas: {num_tablas}\n"
-                          f"💾 Ubicación: {backup_path}")
-    
-    except Exception as e:
-        messagebox.showerror("❌ Error", 
-                           f"No se pudo crear el backup:\n{str(e)}")
 
 def exportar_datos():
     """
@@ -575,7 +915,6 @@ def configurar_impresora():
                         "🔌 Puerto USB recomendado\n"
                         "📄 Papel térmico 58mm o 80mm")
 
-# Resto del código permanece igual...
 def crear_cuadro(padre, texto, icono, color, tipo):
     """
     Creates a styled interactive square button for configuration options.

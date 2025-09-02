@@ -8,6 +8,22 @@ Archivo: interface/pantalla_carga.py
 import tkinter as tk
 import math
 import threading
+import sys
+import os
+
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Importación opcional de pyttsx3 con manejo de errores
+try:
+    import pyttsx3
+    TTS_DISPONIBLE = True
+except ImportError:
+    print("Warning: pyttsx3 no disponible, la voz estará deshabilitada")
+    TTS_DISPONIBLE = False
 
 def mostrar_carga(nombre="Usuario", usuario_info=None):
     """
@@ -19,6 +35,9 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
     
     def reproducir_bienvenida():
         """Reproduce mensaje de bienvenida en hilo separado (opcional)"""
+        if not TTS_DISPONIBLE:
+            return
+            
         try:
             import pyttsx3
             engine = pyttsx3.init()
@@ -27,7 +46,8 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
             mensaje = f"Bienvenido {nombre}, sistema listo"
             engine.say(mensaje)
             engine.runAndWait()
-        except:
+        except Exception as e:
+            print(f"Error en TTS: {e}")
             pass  # Si hay problemas con TTS, continúa sin sonido
 
     # Iniciar TTS en hilo separado para no bloquear la UI
