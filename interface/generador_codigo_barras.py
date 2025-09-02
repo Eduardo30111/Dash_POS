@@ -270,7 +270,7 @@ class GeneradorCodigoBarras:
                 font = None
             
             text_width = draw.textlength(texto, font=font) if hasattr(draw, 'textlength') else len(texto) * 8
-            text_x = (width - text_width) // 2
+            text_x = (width - text_width) // 6
             draw.text((text_x, height + 5), texto, fill='black', font=font)
         
         return img
