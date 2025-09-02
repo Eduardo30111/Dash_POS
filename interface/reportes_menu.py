@@ -2,18 +2,53 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
 import os
+import sys
 from datetime import datetime, timedelta
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 import calendar
-import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+# Configuración de rutas para PyInstaller
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Importaciones opcionales con manejo de errores
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    REPORTLAB_DISPONIBLE = True
+except ImportError as e:
+    print(f"Warning: ReportLab no disponible: {e}")
+    REPORTLAB_DISPONIBLE = False
+
+try:
+    import pandas as pd
+    PANDAS_DISPONIBLE = True
+except ImportError as e:
+    print(f"Warning: Pandas no disponible: {e}")
+    PANDAS_DISPONIBLE = False
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    OPENPYXL_DISPONIBLE = True
+except ImportError as e:
+    print(f"Warning: OpenPyXL no disponible: {e}")
+    OPENPYXL_DISPONIBLE = False
+
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    import matplotlib.dates as mdates
+    MATPLOTLIB_DISPONIBLE = True
+except ImportError as e:
+    print(f"Warning: Matplotlib no disponible: {e}")
+    MATPLOTLIB_DISPONIBLE = False
 
 # ⚠️ The path to the database
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -263,6 +298,10 @@ def abrir_reporte_detallado(ventana_principal, titulo, fecha_inicio_str, fecha_f
 
 def generar_reporte_mensual_pdf():
     """Generates a monthly report and creates a PDF with expenses included."""
+    if not REPORTLAB_DISPONIBLE:
+        messagebox.showerror("❌ Error", "ReportLab no está disponible. No se pueden generar reportes PDF.")
+        return
+        
     if not cursor: return
     try:
         # Calcular fechas del mes actual
@@ -375,6 +414,10 @@ def generar_reporte_mensual_pdf():
 
 def generar_excel_mensual():
     """Genera un archivo Excel con el reporte mensual detallado."""
+    if not OPENPYXL_DISPONIBLE:
+        messagebox.showerror("❌ Error", "OpenPyXL no está disponible. No se pueden generar reportes Excel.")
+        return
+        
     if not cursor: return
     
     try:
@@ -629,11 +672,11 @@ def abrir_reportes_mensuales(ventana_principal):
 
 def generar_grafico_ventas_mensuales(ventana_principal):
     """Genera un gráfico de ventas mensuales históricas."""
+    if not MATPLOTLIB_DISPONIBLE:
+        messagebox.showerror("❌ Error", "Matplotlib no está disponible. No se pueden generar gráficos.")
+        return
+        
     try:
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        import matplotlib.dates as mdates
-        from datetime import datetime
         
         # Crear ventana para el gráfico
         ventana_grafico = tk.Toplevel(ventana_principal)
