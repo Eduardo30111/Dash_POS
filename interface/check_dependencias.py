@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python37
 """
 Script para verificar todas las dependencias de VmPOS
 """
