@@ -5,6 +5,65 @@ import os
 import sys
 from datetime import datetime, timedelta
 import calendar
+def verificar_y_crear_tablas():
+    """Verifica que todas las tablas necesarias existan y las crea si es necesario."""
+    global conn, cursor
+    if not conn or not cursor:
+        if not conectar_db():
+            return False
+    
+    try:
+        # Verificar si existe la tabla ventas
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='ventas'
+        """)
+        tabla_ventas = cursor.fetchone()
+        
+        if not tabla_ventas:
+            # Crear tabla ventas
+            cursor.execute("""
+                CREATE TABLE ventas (
+                    id_venta INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fecha_venta DATE NOT NULL,
+                    hora_venta TIME NOT NULL,
+                    total_venta REAL NOT NULL,
+                    cliente_id INTEGER,
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            print("✅ Tabla 'ventas' creada")
+        
+        # Verificar si existe la tabla detalle_ventas
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='detalle_ventas'
+        """)
+        tabla_detalle = cursor.fetchone()
+        
+        if not tabla_detalle:
+            # Crear tabla detalle_ventas
+            cursor.execute("""
+                CREATE TABLE detalle_ventas (
+                    id_detalle INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id_venta INTEGER NOT NULL,
+                    nombre_producto TEXT NOT NULL,
+                    cantidad INTEGER NOT NULL,
+                    precio_unitario REAL NOT NULL,
+                    subtotal REAL NOT NULL,
+                    FOREIGN KEY (id_venta) REFERENCES ventas (id_venta)
+                )
+            """)
+            print("✅ Tabla 'detalle_ventas' creada")
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error verificando/creando tablas: {e}")
+        if conn:
+            conn.rollback()
+        return False
 
 # Configuración de rutas para PyInstaller
 if getattr(sys, 'frozen', False):
@@ -51,9 +110,22 @@ except ImportError as e:
     MATPLOTLIB_DISPONIBLE = False
 
 # ⚠️ The path to the database
-base_dir = os.path.dirname(os.path.abspath(__file__))
-database_dir = os.path.join(base_dir, '..', 'database')
+# Configuración de rutas mejorada para PyInstaller
+if getattr(sys, 'frozen', False):
+    # Si está ejecutándose como ejecutable
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # Si está ejecutándose como script de Python
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Ruta de base de datos - siempre fuera del ejecutable para persistencia
+base_dir = BASE_DIR
+database_dir = os.path.join(base_dir, 'database')
 ruta_db = os.path.join(database_dir, 'ventas.db')
+
+# Crear directorio si no existe
+if not os.path.exists(database_dir):
+    os.makedirs(database_dir, exist_ok=True)
 # ⚠️ The folder to save PDFs and Excel files
 pdf_dir = os.path.join(base_dir, '..', 'reports_pdf')
 excel_dir = os.path.join(base_dir, '..', 'reports_excel')
@@ -70,9 +142,16 @@ def conectar_db():
     """Establishes a single connection to the database."""
     global conn, cursor
     try:
+        # Asegurar que el directorio existe
+        os.makedirs(os.path.dirname(ruta_db), exist_ok=True)
+        
         conn = sqlite3.connect(ruta_db)
         cursor = conn.cursor()
+        
+        # Verificar y crear tablas necesarias
+        verificar_y_crear_tablas()
         crear_tabla_gastos_si_no_existe()
+        
         return True
     except Exception as e:
         messagebox.showerror("Error de conexión", f"No se pudo conectar a la base de datos:\n{e}")
@@ -236,17 +315,41 @@ def abrir_reporte_detallado(ventana_principal, titulo, fecha_inicio_str, fecha_f
         tabla_gastos.column(col, width=widths_gastos[i], anchor="center")
 
     # Obtener y mostrar datos de VENTAS
+    # Obtener y mostrar datos de VENTAS - VERSIÓN SEGURA
     total_ventas_periodo = 0
     try:
+        # Primero verificar qué tablas existen
         cursor.execute("""
-            SELECT v.fecha_venta, v.hora_venta, dv.nombre_producto, dv.cantidad, dv.precio_unitario, dv.subtotal
-            FROM detalle_ventas dv
-            INNER JOIN ventas v ON dv.id_venta = v.id_venta
-            WHERE v.fecha_venta BETWEEN ? AND ?
-            ORDER BY v.fecha_venta DESC, v.hora_venta DESC
-        """, (fecha_inicio_str, fecha_fin_str))
-        
-        ventas_periodo = cursor.fetchall()
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name IN ('ventas', 'detalle_ventas')
+        """)
+        tablas_existentes = [row[0] for row in cursor.fetchall()]
+    
+        if 'ventas' not in tablas_existentes:
+            ventas_periodo = []
+        elif 'detalle_ventas' not in tablas_existentes:
+            # Solo tabla ventas existe
+            cursor.execute("""
+                SELECT fecha_venta, hora_venta, 'Venta General' as producto, 1 as cantidad, total_venta, total_venta
+                FROM ventas
+                WHERE fecha_venta BETWEEN ? AND ?
+                ORDER BY fecha_venta DESC, hora_venta DESC
+            """, (fecha_inicio_str, fecha_fin_str))
+            ventas_periodo = cursor.fetchall()
+        else:
+        # Ambas tablas existen, usar LEFT JOIN por seguridad
+            cursor.execute("""
+                SELECT v.fecha_venta, v.hora_venta, 
+                   COALESCE(dv.nombre_producto, 'Venta General') as nombre_producto, 
+                   COALESCE(dv.cantidad, 1) as cantidad, 
+                   COALESCE(dv.precio_unitario, v.total_venta) as precio_unitario, 
+                   COALESCE(dv.subtotal, v.total_venta) as subtotal
+                FROM ventas v
+                LEFT JOIN detalle_ventas dv ON v.id_venta = dv.id_venta
+                WHERE v.fecha_venta BETWEEN ? AND ?
+                ORDER BY v.fecha_venta DESC, v.hora_venta DESC
+            """, (fecha_inicio_str, fecha_fin_str))
+            ventas_periodo = cursor.fetchall()
         
         for venta in ventas_periodo:
             tabla_ventas.insert("", tk.END, values=(

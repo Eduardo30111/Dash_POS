@@ -10,12 +10,13 @@ import sys
 
 # Configuración de rutas para PyInstaller
 if getattr(sys, 'frozen', False):
-    BASE_DIR = sys._MEIPASS
+    BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-sys.path.insert(0, BASE_DIR)
-sys.path.insert(0, os.path.join(BASE_DIR, 'interface'))
+base_dir = BASE_DIR
+database_dir = os.path.join(base_dir, 'database')
+ruta_db = os.path.join(database_dir, 'ventas.db')
 
 # Intentar importar el generador de códigos de barras
 GENERADOR_DISPONIBLE = False
@@ -28,6 +29,7 @@ try:
 except ImportError as e:
     print(f"⚠️ Generador de códigos de barras no disponible: {e}")
     GENERADOR_DISPONIBLE = False
+
 
 # Importaciones con manejo de errores
 try:

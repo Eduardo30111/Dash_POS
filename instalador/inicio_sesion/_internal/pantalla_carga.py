@@ -33,6 +33,12 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
         usuario_info (dict): Información completa del usuario (con claves 'usuario' y 'permisos')
     """
     
+    # Determinar el nombre real del usuario
+    if usuario_info and 'usuario' in usuario_info:
+        nombre_real = usuario_info['usuario']
+    else:
+        nombre_real = nombre
+    
     def reproducir_bienvenida():
         """Reproduce mensaje de bienvenida en hilo separado (opcional)"""
         if not TTS_DISPONIBLE:
@@ -43,7 +49,7 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
             engine = pyttsx3.init()
             engine.setProperty('rate', 170)  # Más rápido
             engine.setProperty('volume', 0.8)  # Volumen más bajo
-            mensaje = f"Bienvenido {nombre}, sistema listo"
+            mensaje = f"Bienvenido {nombre_real}, sistema listo"
             engine.say(mensaje)
             engine.runAndWait()
         except Exception as e:
@@ -54,7 +60,7 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
     threading.Thread(target=reproducir_bienvenida, daemon=True).start()
 
     ventana = tk.Tk()
-    ventana.title(f"VmPOS - Bienvenido {nombre} ✨")
+    ventana.title(f"VmPOS - Bienvenido {nombre_real} ✨")
     ventana.geometry("550x350")  # Tamaño reducido
     ventana.configure(bg="#ff9ff3")
     ventana.resizable(False, False)
@@ -95,19 +101,19 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
 
     if usuario_info:
         # Corrección: se usan las claves correctas 'usuario' y 'permisos'
-        nombre_usuario = usuario_info.get('usuario', 'Usuario')
-        permisos_usuario = usuario_info.get('permisos', 'No definido')
+        nombre_usuario = usuario_info.get('usuario', nombre_real)
+        permisos_usuario = usuario_info.get('rol_completo', usuario_info.get('permisos', 'No definido'))
 
-        tk.Label(user_info_frame, text=f"¡Hola {nombre_usuario.capitalize()}! �", 
+        tk.Label(user_info_frame, text=f"¡Hola {nombre_usuario.capitalize()}! 👋", 
                  font=("Segoe UI", 20, "bold"), bg="#ffeaa7", fg="#e84393").pack()
         
-        tk.Label(user_info_frame, text=f"Rol: {permisos_usuario.capitalize()}", 
+        tk.Label(user_info_frame, text=f"Rol: {permisos_usuario}", 
                  font=("Segoe UI", 12), bg="#ffeaa7", fg="#2d3436").pack()
         
         tk.Label(user_info_frame, text="Iniciando VmPOS...", 
                  font=("Segoe UI", 14), bg="#ffeaa7", fg="#636e72").pack(pady=(5, 0))
     else:
-        tk.Label(user_info_frame, text=f"¡Hola {nombre}! 👋", 
+        tk.Label(user_info_frame, text=f"¡Hola {nombre_real}! 👋", 
                  font=("Segoe UI", 20, "bold"), bg="#ffeaa7", fg="#e84393").pack()
         
         tk.Label(user_info_frame, text="Iniciando VmPOS...", 
@@ -173,13 +179,18 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
 
     def animar_iconos(indice=0):
         """Animación de iconos más rápida"""
-        for i, label in enumerate(icon_labels):
-            if i == indice % len(icon_labels):
-                label.config(font=("Segoe UI Emoji", 20))
-            else:
-                label.config(font=("Segoe UI Emoji", 16))
-        
-        ventana.after(400, lambda: animar_iconos(indice + 1))
+        try:
+            for i, label in enumerate(icon_labels):
+                if i == indice % len(icon_labels):
+                    label.config(font=("Segoe UI Emoji", 20))
+                else:
+                    label.config(font=("Segoe UI Emoji", 16))
+            
+            if ventana.winfo_exists():
+                ventana.after(400, lambda: animar_iconos(indice + 1))
+        except tk.TclError:
+            # La ventana ya fue destruida
+            pass
 
     # Animación mucho más rápida
     total_cycles = 20  # Reducido drásticamente de 48 a 20
@@ -187,48 +198,59 @@ def mostrar_carga(nombre="Usuario", usuario_info=None):
     def animar_loader(indice=0, ciclos=0):
         nonlocal progress_width
         
-        if ciclos < total_cycles:
-            # Animar círculos del loader
-            for i, circle in enumerate(circles):
-                if i == indice:
-                    canvas.itemconfig(circle, fill="#fd79a8")
-                elif i == (indice - 1) % 8:
-                    canvas.itemconfig(circle, fill="#a29bfe")
-                else:
-                    canvas.itemconfig(circle, fill="#fed3d7")
-            
-            # Animar barra de progreso
-            progress_width = (ciclos / (total_cycles - 1)) * max_width
-            progress_bar.config(width=int(progress_width))
-            
-            # Cambiar mensaje de estado
-            message_index = min(ciclos // (total_cycles // len(status_messages)), len(status_messages) - 1)
-            status_label.config(text=status_messages[message_index])
-            
-            ventana.update()
-            ventana.after(50, lambda: animar_loader((indice + 1) % 8, ciclos + 1))  # Muy rápido
-        else:
-            # Finalizar
-            status_label.config(text="¡Listo! 🎉")
-            progress_bar.config(width=max_width, bg="#55efc4")
-            ventana.update()
-            ventana.after(200, ventana.destroy)  # Cerrar rápidamente
+        try:
+            if ciclos < total_cycles and ventana.winfo_exists():
+                # Animar círculos del loader
+                for i, circle in enumerate(circles):
+                    if i == indice:
+                        canvas.itemconfig(circle, fill="#fd79a8")
+                    elif i == (indice - 1) % 8:
+                        canvas.itemconfig(circle, fill="#a29bfe")
+                    else:
+                        canvas.itemconfig(circle, fill="#fed3d7")
+                
+                # Animar barra de progreso
+                progress_width = (ciclos / (total_cycles - 1)) * max_width
+                progress_bar.config(width=int(progress_width))
+                
+                # Cambiar mensaje de estado
+                message_index = min(ciclos // (total_cycles // len(status_messages)), len(status_messages) - 1)
+                status_label.config(text=status_messages[message_index])
+                
+                ventana.update()
+                ventana.after(50, lambda: animar_loader((indice + 1) % 8, ciclos + 1))  # Muy rápido
+            elif ventana.winfo_exists():
+                # Finalizar
+                status_label.config(text="¡Listo! 🎉")
+                progress_bar.config(width=max_width, bg="#55efc4")
+                ventana.update()
+                ventana.after(200, ventana.destroy)  # Cerrar rápidamente
+        except tk.TclError:
+            # La ventana ya fue destruida
+            pass
 
     # Iniciar animaciones
     ventana.after(100, animar_iconos)
     ventana.after(100, animar_loader)
     
     # Auto-cerrar por seguridad (por si algo falla)
-    ventana.after(3000, ventana.destroy)
+    ventana.after(3000, lambda: ventana.destroy() if ventana.winfo_exists() else None)
     
-    ventana.mainloop()
+    try:
+        ventana.mainloop()
+    except tk.TclError:
+        # La ventana ya fue destruida
+        pass
+    
+    # Retornar referencia a la ventana para compatibilidad
+    return ventana
 
 # Función de prueba
 if __name__ == "__main__":
     # Simular información de usuario
     usuario_test = {
-        'usuario': 'Ana', # Cambiado a 'usuario'
-        'permisos': 'Administrador' # Cambiado a 'permisos'
+        'usuario': 'Ana',
+        'permisos': 'administrador',
+        'rol_completo': 'Administrador'
     }
     mostrar_carga("Ana", usuario_test)
-

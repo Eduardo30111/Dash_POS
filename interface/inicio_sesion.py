@@ -36,8 +36,9 @@ try:
     from pantalla_carga import mostrar_carga
 except ImportError as e:
     print(f"Error importando pantalla_carga: {e}")
-    def mostrar_carga(*args, **kwargs):
-        print("Pantalla de carga no disponible")
+    def mostrar_carga(nombre="Usuario", usuario_info=None):
+        print(f"Pantalla de carga no disponible para {nombre}")
+        return None
 
 try:
     from usuarios_db import (
@@ -239,12 +240,23 @@ def _iniciar_flujo_principal(datos_usuario, usuario_actual):
     """
     Función auxiliar para manejar la transición a la siguiente ventana.
     """
-    # 1. Destruimos la ventana de login ANTES de llamar al siguiente módulo.
-    ventana.destroy()
-    # 2. Mostramos la pantalla de carga, y guardamos la referencia en los datos del usuario.
-    datos_usuario['ventana_carga'] = mostrar_carga(nombre=usuario_actual, usuario_info=datos_usuario)
-    # 3. Iniciamos el dashboard principal.
-    menu_inicio.iniciar_dashboard(usuario_actual, datos_usuario)
+    try:
+        # 1. Destruimos la ventana de login ANTES de llamar al siguiente módulo.
+        ventana.destroy()
+        
+        # 2. Mostramos la pantalla de carga con parámetros corregidos
+        print(f"📺 Mostrando pantalla de carga para {usuario_actual}")
+        mostrar_carga(usuario_actual, datos_usuario)
+        
+        # 3. Iniciamos el dashboard principal (si está disponible)
+        if menu_inicio:
+            print(f"🚀 Iniciando dashboard para {usuario_actual}")
+            menu_inicio.iniciar_dashboard(usuario_actual, datos_usuario)
+        else:
+            print("❌ Dashboard no disponible")
+            
+    except Exception as e:
+        print(f"❌ Error en flujo principal: {e}")
 
 def validar_usuario(event=None):
     """
@@ -268,7 +280,6 @@ def validar_usuario(event=None):
     
     # --- Lógica de transición corregida ---
     # Llamamos a la función auxiliar después de un breve retraso.
-    # Esto evita el error de sintaxis del lambda con múltiples sentencias.
     ventana.after(1500, lambda: _iniciar_flujo_principal(datos_usuario, usuario_actual))
 
 def limpiar_campos():
@@ -280,9 +291,7 @@ def limpiar_campos():
     entry_user.focus()
 
 def mostrar_info_usuarios():
-    """Muestra información sobre usuarios disponibles (solo para desar
-    
-    lo/demo)"""
+    """Muestra información sobre usuarios disponibles (solo para desarrollo/demo)"""
     mensaje = """Usuarios disponibles en el sistema:
     
 👤 admin / admin123 (Administrador)
