@@ -847,83 +847,46 @@ class App:
         self.actualizar_total()
 
     def escanear_codigo(self):
-        """Procesar código escaneado o ingresado - MEJORADO"""
+        """Escanea un código de barras y agrega el producto"""
         codigo = self.codigo_entrada.get().strip()
         if not codigo:
             return
-
-        print(f"DEBUG: Buscando código: '{codigo}'")
-        
-        # Buscar producto - buscar tanto código exacto como con ceros
-        producto = None
-        for p in self.productos_inventario:
-            if str(p[0]) == codigo or str(p[0]).zfill(5) == codigo or codigo.zfill(5) == str(p[0]):
-                producto = p
-                break
-        
-        if producto:
-            print(f"DEBUG: Producto encontrado: {producto[1]}, Stock: {producto[2]}")
-            
-            if producto[2] > 0:  # Verificar stock
-                self.agregar_producto(str(producto[0]), producto[1], producto[3])
-                self.codigo_entrada.set("")
-                self.entry_codigo.focus()
-            else:
-                messagebox.showwarning("Sin stock", f"'{producto[1]}' sin stock")
-                self.codigo_entrada.set("")
+        producto = next((p for p in self.productos_inventario if str(p[0]) == codigo or str(p[0]).zfill(5) == codigo), None)
+        if producto and producto[2] > 0:
+            self.agregar_producto(producto[0], producto[1], producto[3])
+            self.codigo_entrada.set("")
+            self.entry_codigo.focus()
         else:
-            print(f"DEBUG: Producto no encontrado para código: '{codigo}'")
-            print(f"DEBUG: Códigos disponibles en inventario: {[str(p[0]) for p in self.productos_inventario[:5]]}")
-            messagebox.showerror("No encontrado", "Producto no existe")
+            messagebox.showerror("No encontrado", "Producto no existe o sin stock")
             self.codigo_entrada.set("")
 
     def eliminar_seleccionado(self):
-        """Eliminar producto seleccionado del carrito"""
+        """Elimina el producto seleccionado del carrito"""
         item = self.tabla.focus()
-        if not item:
-            messagebox.showwarning("Selección", "Selecciona un producto para eliminar")
-            return
-        
-        valores = self.tabla.item(item)["values"]
-        total_item = self.limpiar_precio(valores[3])
-        self.total_general.set(self.total_general.get() - total_item)
-        self.tabla.delete(item)
-        self.actualizar_total()
+        if item:
+            valores = self.tabla.item(item)["values"]
+            self.total_general.set(self.total_general.get() - self.limpiar_precio(valores[3]))
+            self.tabla.delete(item)
+            self.actualizar_total()
 
     def pagar(self):
-        """Procesar pago de la venta"""
-        if not self.documento.get().strip():
-            messagebox.showerror("Documento requerido", "Ingresa el documento del cliente")
-            self.entry_doc.focus()
+        """Abre la ventana para procesar el pago"""
+        if not self.documento.get().strip() or self.total_general.get() <= 0:
+            messagebox.showerror("Error", "Ingresa documento y agrega productos")
             return
-        
-        if self.total_general.get() <= 0:
-            messagebox.showerror("Sin productos", "Agrega productos antes de pagar")
-            return
-
         ventana = tk.Toplevel(self.ventana)
         ventana.title("💳 Procesar Pago")
         ventana.geometry("400x250")
         ventana.configure(bg="#FFB6C1")
         ventana.grab_set()
-
-        # Centrar ventana
         ventana.update_idletasks()
         x = (self.ventana.winfo_screenwidth() // 2) - 200
         y = (self.ventana.winfo_screenheight() // 2) - 125
         ventana.geometry(f"400x250+{x}+{y}")
-
-        tk.Label(ventana, text="💖 PROCESAR PAGO", font=("Arial", 16, "bold"),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=15)
-
-        tk.Label(ventana, text="💸 Total:", font=("Arial", 12, "bold"),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=5)
-        tk.Label(ventana, text=self.formato_peso(self.total_general.get()),
-                font=("Arial", 14, "bold"), bg="#FFB6C1", fg="#FF1493").pack(pady=5)
-
-        tk.Label(ventana, text="💵 Efectivo recibido:", font=("Arial", 12, "bold"),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=5)
-        
+        tk.Label(ventana, text="💖 PROCESAR PAGO", font=("Arial", 16, "bold"), bg="#FFB6C1", fg="#8B0054").pack(pady=15)
+        tk.Label(ventana, text="💸 Total:", font=("Arial", 12, "bold"), bg="#FFB6C1", fg="#8B0054").pack(pady=5)
+        tk.Label(ventana, text=self.formato_peso(self.total_general.get()), font=("Arial", 14, "bold"), bg="#FFB6C1", fg="#FF1493").pack(pady=5)
+        tk.Label(ventana, text="💵 Efectivo recibido:", font=("Arial", 12, "bold"), bg="#FFB6C1", fg="#8B0054").pack(pady=5)
         efectivo = tk.DoubleVar()
         entry = tk.Entry(ventana, textvariable=efectivo, font=("Arial", 12), width=20)
         entry.pack(pady=5)
@@ -931,277 +894,86 @@ class App:
 
         def completar():
             try:
-                recibido = efectivo.get()
-                total = self.total_general.get()
-                
-                if recibido < total:
-                    messagebox.showwarning("Efectivo insuficiente", 
-                                         f"Faltan: {self.formato_peso(total - recibido)}")
-                    return
-
-                # Procesar venta
-                if self.procesar_venta_completa(recibido, total):
+                if efectivo.get() >= self.total_general.get():
+                    self.procesar_venta_completa(efectivo.get(), self.total_general.get())
                     ventana.destroy()
-                    
+                else:
+                    messagebox.showwarning("Efectivo insuficiente", "Monto recibido menor al total")
             except (tk.TclError, ValueError):
                 messagebox.showerror("Error", "Ingresa un monto válido")
 
         entry.bind('<Return>', lambda e: completar())
-        
         tk.Button(ventana, text="✅ Completar Pago", command=completar, bg="#32CD32", fg="white",
                  font=("Arial", 12, "bold"), padx=20, pady=10).pack(pady=20)
 
     def procesar_venta_completa(self, recibido, total):
-        """Procesa toda la venta: DB + impresión + caja - MEJORADO PARA IMPRESIÓN INMEDIATA"""
+        """Procesa la venta y guarda en la base de datos"""
         try:
-            print(f"DEBUG: Iniciando procesamiento de venta - Total: {total}")
-            
-            # CAPTURAR DATOS INMEDIATAMENTE ANTES DE CUALQUIER MODIFICACIÓN
-            datos_venta_inmediatos = {
+            datos_venta = {
                 'factura': self.factura_num,
                 'fecha': datetime.now().strftime('%d-%m-%Y'),
                 'hora': datetime.now().strftime('%H:%M:%S'),
                 'cliente': self.documento.get(),
-                'productos': [],
+                'productos': [(v[0], self.limpiar_precio(v[1]), int(v[2])) for v in [self.tabla.item(i)["values"] for i in self.tabla.get_children()]],
                 'total': total
             }
-            
-            # CAPTURAR PRODUCTOS DEL CARRITO INMEDIATAMENTE
-            productos_detalle = []
-            for item in self.tabla.get_children():
-                valores = self.tabla.item(item)["values"]
-                if len(valores) >= 4:
-                    nombre = str(valores[0])
-                    precio_txt = str(valores[1])
-                    cantidad = int(valores[2])
-                    subtotal_txt = str(valores[3])
-                    
-                    precio = self.limpiar_precio(precio_txt)
-                    subtotal = self.limpiar_precio(subtotal_txt)
-                    
-                    # Para impresión
-                    datos_venta_inmediatos['productos'].append((nombre, precio, cantidad))
-                    
-                    # Para base de datos - buscar código del producto
-                    codigo = None
-                    for p in self.productos_inventario:
-                        if str(p[1]).strip().lower() == nombre.strip().lower():
-                            codigo = str(p[0])
-                            break
-                    
-                    if codigo:
-                        productos_detalle.append((codigo, nombre, precio, cantidad, subtotal))
-            
-            print(f"DEBUG: Datos capturados - {len(datos_venta_inmediatos['productos'])} productos")
-            
-            # Guardar en base de datos
             id_venta = self.guardar_venta_db(self.documento.get(), total)
-            if not id_venta:
-                return False
-
-            # Guardar detalles y actualizar stock
-            if not self.guardar_detalle_ventas_db(id_venta, productos_detalle):
-                return False
-
-            # IMPRIMIR INMEDIATAMENTE CON CALLBACK
-            def callback_impresion(exito, mensaje):
-                if exito:
-                    print("DEBUG: ✅ Impresión completada exitosamente")
-                    # Abrir caja registradora después de impresión exitosa
-                    try:
+            if id_venta:
+                detalles = [(p[0], p[0], self.limpiar_precio(p[1]), p[2], p[2] * self.limpiar_precio(p[1])) for p in datos_venta['productos']]
+                if self.guardar_detalle_ventas_db(id_venta, detalles):
+                    if self.printer_manager and self.impresora_conectada:
+                        self.printer_manager.imprimir_factura(datos_venta)
                         self.printer_manager.abrir_caja_registradora()
-                    except:
-                        pass  # No fallar si no se puede abrir la caja
-                else:
-                    print(f"DEBUG: ❌ Error en impresión: {mensaje}")
-                    # Mostrar error pero no detener el proceso
-                    self.ventana.after(0, lambda: self.mostrar_error_impresion(Exception(mensaje)))
-
-            # EJECUTAR IMPRESIÓN INMEDIATAMENTE
-            if IMPRESION_DISPONIBLE and self.printer_manager:
-                if not self.impresora_conectada:
-                    if self.printer_manager.conectar_impresora():
-                        self.impresora_conectada = True
-                
-                if self.impresora_conectada:
-                    print("DEBUG: Enviando a impresión...")
-                    self.printer_manager.imprimir_factura(datos_venta_inmediatos, callback_impresion)
-                else:
-                    print("DEBUG: No se pudo conectar impresora")
-
-            # Mostrar resultado
-            vuelto = recibido - total
-            resultado = f"""💖 VENTA COMPLETADA 💖
-
-🧾 Factura: {self.factura_num}
-📅 {datetime.now().strftime('%d-%m-%Y')} 🕒 {datetime.now().strftime('%H:%M:%S')}
-👤 Cliente: {self.documento.get()}
-
-💸 Total: {self.formato_peso(total)}
-💵 Recibido: {self.formato_peso(recibido)}
-💰 Cambio: {self.formato_peso(vuelto)}
-
-🌸 ¡Gracias por tu compra! 🌸"""
-            
-            messagebox.showinfo("✅ Pago Completado", resultado)
-
-            # Actualizar inventario y limpiar DESPUÉS de mostrar el mensaje
-            self.productos_inventario = self.obtener_productos()
-            self.limpiar_formulario()
-            
-            return True
-            
+                    vuelto = recibido - total
+                    messagebox.showinfo("✅ Pago Completado", f"💖 VENTA COMPLETADA 💖\n🧾 Factura: {self.factura_num}\n💸 Total: {self.formato_peso(total)}\n💵 Recibido: {self.formato_peso(recibido)}\n💰 Cambio: {self.formato_peso(vuelto)}\n🌸 ¡Gracias! 🌸")
+                    self.limpiar_formulario()
+                    self.productos_inventario = self.obtener_productos()
         except Exception as e:
-            print(f"DEBUG: Error procesando venta: {e}")
             messagebox.showerror("Error", f"Error procesando venta: {e}")
-            return False
-
-    def mostrar_error_impresion(self, error):
-        """Mostrar ventana de error de impresión - MEJORADO"""
-        ventana = tk.Toplevel(self.ventana)
-        ventana.title("❌ Error de impresión")
-        ventana.geometry("500x350")
-        ventana.configure(bg="#FFB6C1")
-        ventana.grab_set()
-
-        # Centrar ventana
-        ventana.update_idletasks()
-        x = (self.ventana.winfo_screenwidth() // 2) - 250
-        y = (self.ventana.winfo_screenheight() // 2) - 175
-        ventana.geometry(f"500x350+{x}+{y}")
-
-        tk.Label(ventana, text="❌ ERROR DE IMPRESIÓN", font=("Arial", 14, "bold"),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=10)
-
-        tk.Label(ventana, text="No se pudo imprimir la factura:", font=("Arial", 10),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=5)
-
-        # Mostrar error
-        error_frame = tk.Frame(ventana, bg="white", relief="sunken", bd=1)
-        error_frame.pack(pady=10, padx=20, fill="x")
-        tk.Label(error_frame, text=str(error), font=("Arial", 9), bg="white", fg="red",
-                wraplength=450, justify="left").pack(pady=5, padx=5)
-
-        tk.Label(ventana, text="💡 Soluciones:", font=("Arial", 10, "bold"),
-                bg="#FFB6C1", fg="#8B0054").pack(pady=(10,5))
-
-        soluciones = """• Verifica que la impresora esté encendida
-• Revisa la conexión USB
-• Reinicia la impresora
-• Ejecuta la aplicación como administrador
-• Usa el botón 'REIMPRIMIR' en emergencias"""
-
-        tk.Label(ventana, text=soluciones, font=("Arial", 9), bg="#FFB6C1", fg="#8B0054",
-                justify="left").pack(pady=5)
-
-        # Botón para reintentar impresión
-        def reintentar():
-            try:
-                if self.printer_manager and self.printer_manager.ultima_factura:
-                    self.printer_manager.imprimir_factura(self.printer_manager.ultima_factura)
-                    ventana.destroy()
-                    messagebox.showinfo("✅ Reintento", "Factura enviada nuevamente a impresión")
-                else:
-                    messagebox.showwarning("Sin datos", "No hay datos de factura para reintentar")
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al reintentar: {e}")
-
-        btn_frame = tk.Frame(ventana, bg="#FFB6C1")
-        btn_frame.pack(pady=15)
-        
-        tk.Button(btn_frame, text="🔄 Reintentar", command=reintentar, bg="#FF8C00", fg="white",
-                 font=("Arial", 10, "bold"), padx=15, pady=5).pack(side="left", padx=5)
-        
-        tk.Button(btn_frame, text="✅ Aceptar", command=ventana.destroy, bg="#FF69B4", fg="white",
-                 font=("Arial", 10, "bold"), padx=20, pady=5).pack(side="left", padx=5)
-
-    # ====================================================================================
-    #   FUNCIONES DE BASE DE DATOS
-    # ====================================================================================
 
     def guardar_venta_db(self, documento_cliente, total_venta):
-        """Guardar venta principal en la base de datos"""
+        """Guarda la venta en la base de datos"""
         ruta_db = os.path.join(os.path.dirname(__file__), '..', 'database', 'ventas.db')
         try:
             with sqlite3.connect(ruta_db) as conn:
                 cursor = conn.cursor()
-                fecha = datetime.now().strftime("%Y-%m-%d")
-                hora = datetime.now().strftime("%H:%M:%S")
-
-                cursor.execute(
-                    "INSERT INTO ventas (fecha_venta, hora_venta, documento_cliente, total_venta) VALUES (?, ?, ?, ?)",
-                    (fecha, hora, documento_cliente, total_venta)
-                )
-                
-                id_venta = cursor.lastrowid
+                cursor.execute("CREATE TABLE IF NOT EXISTS ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha_venta TEXT, hora_venta TEXT, documento_cliente TEXT, total_venta REAL)")
+                cursor.execute("INSERT INTO ventas (fecha_venta, hora_venta, documento_cliente, total_venta) VALUES (?, ?, ?, ?)",
+                              (datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S"), documento_cliente, total_venta))
                 conn.commit()
-                return id_venta
-                
+                return cursor.lastrowid
         except Exception as e:
             messagebox.showerror("Error DB", f"Error guardando venta: {e}")
             return None
 
     def guardar_detalle_ventas_db(self, id_venta, productos_vendidos):
-        """Guardar detalle de venta y actualizar stock"""
+        """Guarda el detalle de la venta en la base de datos"""
         ruta_db = os.path.join(os.path.dirname(__file__), '..', 'database', 'ventas.db')
         try:
             with sqlite3.connect(ruta_db) as conn:
                 cursor = conn.cursor()
-                
-                for codigo, nombre, precio, cantidad, subtotal in productos_vendidos:
-                    # Insertar detalle
-                    cursor.execute(
-                        "INSERT INTO detalle_ventas (id_venta, codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal) VALUES (?, ?, ?, ?, ?, ?)", 
-                        (id_venta, codigo, nombre, precio, cantidad, subtotal)
-                    )
-                    
-                    # Actualizar stock
-                    cursor.execute("SELECT stock FROM productos WHERE codigo = ?", (codigo,))
-                    resultado = cursor.fetchone()
-                    
-                    if resultado:
-                        nuevo_stock = resultado[0] - cantidad
-                        cursor.execute("UPDATE productos SET stock = ? WHERE codigo = ?", (nuevo_stock, codigo))
-                        print(f"DEBUG: Stock actualizado para {codigo}: {resultado[0]} -> {nuevo_stock}")
-                    else:
-                        # Probar con código formateado
-                        codigo_formateado = str(codigo).zfill(5)
-                        cursor.execute("SELECT stock FROM productos WHERE codigo = ?", (codigo_formateado,))
-                        resultado = cursor.fetchone()
-                        
-                        if resultado:
-                            nuevo_stock = resultado[0] - cantidad
-                            cursor.execute("UPDATE productos SET stock = ? WHERE codigo = ?", (nuevo_stock, codigo_formateado))
-                            print(f"DEBUG: Stock actualizado para {codigo_formateado}: {resultado[0]} -> {nuevo_stock}")
-
+                cursor.execute("CREATE TABLE IF NOT EXISTS detalle_ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, id_venta INTEGER, codigo_producto TEXT, nombre_producto TEXT, precio_unitario REAL, cantidad INTEGER, subtotal REAL)")
+                for codigo, _, precio, cantidad, subtotal in productos_vendidos:
+                    cursor.execute("INSERT INTO detalle_ventas (id_venta, codigo_producto, nombre_producto, precio_unitario, cantidad, subtotal) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (id_venta, codigo, "", precio, cantidad, subtotal))
+                    cursor.execute("UPDATE productos SET stock = stock - ? WHERE codigo = ?", (cantidad, codigo))
                 conn.commit()
                 return True
-                
         except Exception as e:
             messagebox.showerror("Error DB", f"Error guardando detalle: {e}")
             return False
 
     def limpiar_formulario(self):
-        """Limpiar formulario para nueva venta"""
+        """Limpia el formulario para una nueva venta"""
         self.documento.set("")
         self.codigo_entrada.set("")
         self.total_general.set(0.0)
         self.factura_num = datetime.now().strftime("%Y%m%d%H%M%S")
-        
-        # Limpiar tabla
         for item in self.tabla.get_children():
             self.tabla.delete(item)
-        
         self.actualizar_total()
         self.lbl_factura.config(text=f"🧾 Factura: {self.factura_num}")
         self.entry_doc.focus()
-        
-        print("DEBUG: Formulario limpiado para nueva venta")
-
-
-# ====================================================================================
-#   EJECUCIÓN PRINCIPAL
-# ====================================================================================
 
 if __name__ == '__main__':
     root = tk.Tk()
