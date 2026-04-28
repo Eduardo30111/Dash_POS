@@ -1,0 +1,33 @@
+VmPOS - Guia rapida de instalacion para cliente
+==============================================
+
+Archivos de esta carpeta:
+- VmPOS_instalador.exe
+- INSTRUCCIONES_INSTALACION.txt
+
+PASOS DE INSTALACION
+1) Ejecuta "VmPOS_instalador.exe".
+2) Sigue el asistente y deja la ruta por defecto.
+3) Al finalizar, marca "Abrir VmPOS" o abre el acceso directo del escritorio.
+
+DONDE QUEDA INSTALADO
+- Ruta de instalacion por defecto:
+  %LOCALAPPDATA%\VmPOS
+
+- Ejecutable principal:
+  %LOCALAPPDATA%\VmPOS\VmPOS.exe
+
+- Base de datos y licencia local:
+  %LOCALAPPDATA%\VmPOS\database\
+  (aqui se guarda license_remote.json y las bases de datos locales)
+
+COMO ABRIR EL PROGRAMA DESPUES
+- Desde acceso directo del escritorio: "VmPOS"
+- O desde el menu inicio: "VmPOS"
+- O ejecutando directamente:
+  %LOCALAPPDATA%\VmPOS\VmPOS.exe
+
+NOTAS
+- Se requiere internet para validacion remota de licencia segun politica configurada.
+- Si cambias la licencia remota, revisa:
+  %LOCALAPPDATA%\VmPOS\database\license_remote.json

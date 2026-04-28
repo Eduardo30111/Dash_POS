@@ -4,141 +4,143 @@ from datetime import datetime
 import sqlite3
 import os
 
-# Configuración de la base de datos
-base_dir = os.path.dirname(os.path.abspath(__file__))
-database_dir = os.path.join(base_dir, '..', 'database')
-ruta_db = os.path.join(database_dir, 'ventas.db')
+from paths import ventas_db_path
+from layout_responsive import centrar_ventana, crear_cuerpo_modulo_scroll, modulo_scroll_finalizar
+from ui_theme import T, F_TITLE, F_HEAD, F_BODY, F_BODY_B, F_SMALL, F_STAT, style_ttk_treeview_pos
 
-# Conexión global a la base de datos
-conn = None
-cursor = None
+ruta_db = ventas_db_path()
 
-def conectar_db():
-    """Establece conexión con la base de datos"""
-    global conn, cursor
+_SQL_GASTOS = """
+    CREATE TABLE IF NOT EXISTS gastos (
+        id_gasto INTEGER PRIMARY KEY AUTOINCREMENT,
+        concepto TEXT NOT NULL,
+        valor REAL NOT NULL,
+        fecha TEXT NOT NULL,
+        hora TEXT NOT NULL,
+        fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+
+
+def asegurar_tabla_gastos():
+    """Crea la tabla de gastos si no existe (una conexión corta, sin estado global)."""
     try:
-        conn = sqlite3.connect(ruta_db)
-        cursor = conn.cursor()
-        crear_tabla_gastos()
+        with sqlite3.connect(ruta_db) as conn:
+            conn.execute(_SQL_GASTOS)
+            conn.commit()
         return True
     except Exception as e:
-        messagebox.showerror("Error de conexión", f"No se pudo conectar a la base de datos:\n{e}")
+        messagebox.showerror("Error de conexión", f"No se pudo preparar la base de datos de gastos:\n{e}")
         return False
 
-def crear_tabla_gastos():
-    """Crea la tabla de gastos si no existe"""
-    try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS gastos (
-                id_gasto INTEGER PRIMARY KEY AUTOINCREMENT,
-                concepto TEXT NOT NULL,
-                valor REAL NOT NULL,
-                fecha TEXT NOT NULL,
-                hora TEXT NOT NULL,
-                fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-    except Exception as e:
-        messagebox.showerror("Error", f"Error al crear tabla de gastos: {e}")
+
+def conectar_db():
+    """Mantiene nombre por compatibilidad: solo asegura la tabla."""
+    return asegurar_tabla_gastos()
+
 
 def obtener_gastos():
-    """Obtiene todos los gastos de la base de datos"""
     try:
-        cursor.execute("SELECT * FROM gastos ORDER BY fecha_registro DESC")
-        return cursor.fetchall()
+        with sqlite3.connect(ruta_db) as conn:
+            c = conn.cursor()
+            c.execute("SELECT * FROM gastos ORDER BY fecha_registro DESC")
+            return c.fetchall()
     except Exception as e:
         messagebox.showerror("Error", f"Error al obtener gastos: {e}")
         return []
 
+
 def agregar_gasto_db(concepto, valor, fecha, hora):
-    """Agrega un gasto a la base de datos"""
     try:
-        cursor.execute("""
-            INSERT INTO gastos (concepto, valor, fecha, hora)
-            VALUES (?, ?, ?, ?)
-        """, (concepto, valor, fecha, hora))
-        conn.commit()
+        with sqlite3.connect(ruta_db) as conn:
+            conn.execute(
+                "INSERT INTO gastos (concepto, valor, fecha, hora) VALUES (?, ?, ?, ?)",
+                (concepto, valor, fecha, hora),
+            )
+            conn.commit()
         return True
     except Exception as e:
         messagebox.showerror("Error", f"Error al agregar gasto: {e}")
-        conn.rollback()
         return False
 
+
 def eliminar_gasto_db(id_gasto):
-    """Elimina un gasto de la base de datos"""
     try:
-        cursor.execute("DELETE FROM gastos WHERE id_gasto = ?", (id_gasto,))
-        conn.commit()
+        with sqlite3.connect(ruta_db) as conn:
+            conn.execute("DELETE FROM gastos WHERE id_gasto = ?", (id_gasto,))
+            conn.commit()
         return True
     except Exception as e:
         messagebox.showerror("Error", f"Error al eliminar gasto: {e}")
-        conn.rollback()
         return False
 
+
 def modificar_gasto_db(id_gasto, concepto, valor):
-    """Modifica un gasto en la base de datos"""
     try:
-        cursor.execute("""
-            UPDATE gastos SET concepto = ?, valor = ?
-            WHERE id_gasto = ?
-        """, (concepto, valor, id_gasto))
-        conn.commit()
+        with sqlite3.connect(ruta_db) as conn:
+            conn.execute(
+                "UPDATE gastos SET concepto = ?, valor = ? WHERE id_gasto = ?",
+                (concepto, valor, id_gasto),
+            )
+            conn.commit()
         return True
     except Exception as e:
         messagebox.showerror("Error", f"Error al modificar gasto: {e}")
-        conn.rollback()
         return False
 
+
 def calcular_estadisticas_gastos():
-    """Calcula estadísticas de gastos"""
     try:
-        # Total de gastos
-        cursor.execute("SELECT SUM(valor) FROM gastos")
-        total_gastos = cursor.fetchone()[0] or 0
-        
-        # Gastos de hoy
-        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
-        cursor.execute("SELECT COUNT(*), SUM(valor) FROM gastos WHERE fecha = ?", (fecha_hoy,))
-        resultado = cursor.fetchone()
-        gastos_hoy_count = resultado[0] or 0
-        gastos_hoy_valor = resultado[1] or 0
-        
-        # Total de registros
-        cursor.execute("SELECT COUNT(*) FROM gastos")
-        total_registros = cursor.fetchone()[0] or 0
-        
+        with sqlite3.connect(ruta_db) as conn:
+            c = conn.cursor()
+            c.execute("SELECT COALESCE(SUM(valor), 0) FROM gastos")
+            total_gastos = c.fetchone()[0] or 0
+            fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+            c.execute("SELECT COUNT(*), COALESCE(SUM(valor), 0) FROM gastos WHERE fecha = ?", (fecha_hoy,))
+            resultado = c.fetchone()
+            gastos_hoy_count = resultado[0] or 0
+            gastos_hoy_valor = resultado[1] or 0
+            c.execute("SELECT COUNT(*) FROM gastos")
+            total_registros = c.fetchone()[0] or 0
         return total_gastos, gastos_hoy_count, gastos_hoy_valor, total_registros
     except Exception as e:
         messagebox.showerror("Error", f"Error al calcular estadísticas: {e}")
         return 0, 0, 0, 0
 
-def iniciar_gastos():
-    if not conectar_db():
+
+def iniciar_gastos(parent=None):
+    if not asegurar_tabla_gastos():
+        if parent is not None:
+            try:
+                parent.wm_deiconify()
+                parent.lift()
+                parent.focus_force()
+            except tk.TclError:
+                pass
         return
-        
-    ventana = tk.Tk()
-    ventana.title("💸 Control de Gastos - VmPOS")
-    ancho_pantalla = ventana.winfo_screenwidth()
-    alto_pantalla = ventana.winfo_screenheight()
+    if parent is not None:
+        ventana = tk.Toplevel(parent)
+        try:
+            ventana.transient(parent)
+        except tk.TclError:
+            pass
+    else:
+        ventana = tk.Tk()
+    ventana.title("Control de Gastos - VmPOS")
+    if parent is not None:
+        from navegacion_ventanas import instalar_barra_volver
+        instalar_barra_volver(ventana, parent)
+    else:
+        from layout_responsive import configurar_ventana_modulo
+        configurar_ventana_modulo(ventana, min_w=1000, min_h=560, ratio_w=0.9, ratio_h=0.86)
+    ventana.resizable(True, True)
+    ventana.configure(bg=T.BG_APP)
 
-    # Definir proporción deseada (por ejemplo, 80% del ancho y 75% del alto)
-    ancho_ventana = int(ancho_pantalla * 0.8)
-    alto_ventana = int(alto_pantalla * 0.75)
+    footer_frame = tk.Frame(ventana, bg=T.FOOTER, height=48)
+    footer_frame.pack_propagate(False)
+    footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-    # Calcular posición para centrar la ventana
-    x = (ancho_pantalla // 2) - (ancho_ventana // 2)
-    y = (alto_pantalla // 2) - (alto_ventana // 2)
-
-    # Aplicar tamaño y posición
-    ventana.geometry(f"{ancho_ventana}x{alto_ventana}+{x}+{y}")
-    ventana.configure(bg="#FFE4F1")
-    
-    # Centrar ventana
-    ventana.update_idletasks()
-    x = (ventana.winfo_screenwidth() // 2) - (550)
-    y = (ventana.winfo_screenheight() // 2) - (350)
-    ventana.geometry(f"900x600+{x}+{y}")
+    cuerpo = crear_cuerpo_modulo_scroll(ventana, bg=T.BG_APP)
 
     # Variables globales para los campos
     global concepto_var, valor_var, fecha_var, tabla
@@ -146,132 +148,118 @@ def iniciar_gastos():
     valor_var = tk.StringVar()
     fecha_var = tk.StringVar(value=datetime.now().strftime("%d-%m-%Y"))
 
-    # 🌸 Header principal
-    header_frame = tk.Frame(ventana, bg="#FF1493", height=100)
-    header_frame.pack(fill="x")
+    header_frame = tk.Frame(cuerpo, bg=T.POS_HEADER, height=76)
+    header_frame.pack(fill="x", expand=False)
     header_frame.pack_propagate(False)
+    hl = tk.Frame(header_frame, bg=T.POS_HEADER)
+    hl.pack(side=tk.LEFT, fill=tk.Y, padx=20, pady=(14, 16))
+    tk.Label(hl, text="Control de gastos", font=F_TITLE, bg=T.POS_HEADER, fg=T.WHITE).pack(anchor="w")
+    tk.Label(
+        hl,
+        text="Registre egresos con fecha y hora automáticas · búsqueda por concepto o valor",
+        font=F_SMALL,
+        bg=T.POS_HEADER,
+        fg=T.HEADER_TEXT_DIM,
+    ).pack(anchor="w", pady=(4, 0))
 
-    header_content = tk.Frame(header_frame, bg="#FF1493")
-    header_content.pack(expand=True, fill="both")
-
-    title_container = tk.Frame(header_content, bg="#FF1493")
-    title_container.pack(expand=True)
-
-    tk.Label(title_container, text="💸", font=("Segoe UI Emoji", 40), 
-             bg="#FF1493", fg="white").pack(side="left", pady=25, padx=(50, 15))
-    tk.Label(title_container, text="CONTROL DE GASTOS", font=("Segoe UI", 22, "bold"), 
-             bg="#FF1493", fg="white").pack(side="left", pady=30)
-    tk.Label(title_container, text="📊", font=("Segoe UI Emoji", 40), 
-             bg="#FF1493", fg="white").pack(side="left", pady=25, padx=(15, 50))
-
-    # 🕒 Panel de fecha y hora
+    # Panel de fecha y hora
     def actualizar_tiempo():
         ahora = datetime.now()
-        lbl_fecha.config(text=f"📅 {ahora.strftime('%d-%m-%Y')}")
-        lbl_hora.config(text=f"⏰ {ahora.strftime('%H:%M:%S')}")
+        lbl_fecha.config(text=f"Fecha: {ahora.strftime('%d-%m-%Y')}")
+        lbl_hora.config(text=f"Hora: {ahora.strftime('%H:%M:%S')}")
         fecha_var.set(ahora.strftime("%d-%m-%Y"))
         ventana.after(1000, actualizar_tiempo)
 
-    panel_superior = tk.Frame(ventana, bg="#FFDDEE", relief="raised", bd=2)
-    panel_superior.pack(fill="x", pady=5, padx=10)
+    panel_superior = tk.Frame(cuerpo, bg=T.BG_APP)
+    panel_superior.pack(fill="x", pady=(12, 0), padx=16)
 
-    time_container = tk.Frame(panel_superior, bg="#FFDDEE")
-    time_container.pack(pady=15)
+    time_card = tk.Frame(panel_superior, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    time_card.pack(fill="x")
+    bar_t = tk.Frame(time_card, bg=T.STAT_2, height=3)
+    bar_t.pack(fill="x")
+    time_container = tk.Frame(time_card, bg=T.BG_CARD)
+    time_container.pack(pady=12, padx=16)
 
-    lbl_fecha = tk.Label(time_container, text="", font=("Segoe UI", 12, "bold"), 
-                        bg="#FFDDEE", fg="#C71585")
-    lbl_fecha.pack(side="left", padx=20)
+    lbl_fecha = tk.Label(time_container, text="", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT)
+    lbl_fecha.pack(side="left", padx=(0, 24))
 
-    tk.Label(time_container, text="✨", font=("Segoe UI Emoji", 16), 
-             bg="#FFDDEE").pack(side="left", padx=10)
-
-    lbl_hora = tk.Label(time_container, text="", font=("Segoe UI", 12, "bold"), 
-                       bg="#FFDDEE", fg="#C71585")
-    lbl_hora.pack(side="left", padx=20)
+    lbl_hora = tk.Label(time_container, text="", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT_MUTED)
+    lbl_hora.pack(side="left", padx=0)
 
     actualizar_tiempo()
 
-    # 💖 Panel de estadísticas rápidas
-    stats_frame = tk.Frame(ventana, bg="#FFE4F1")
-    stats_frame.pack(fill="x", pady=15, padx=10)
+    stats_frame = tk.Frame(cuerpo, bg=T.BG_APP)
+    stats_frame.pack(fill="x", expand=False, pady=12, padx=16)
 
-    stats_container = tk.Frame(stats_frame, bg="#FFE4F1")
-    stats_container.pack()
+    stats_container = tk.Frame(stats_frame, bg=T.BG_APP)
+    stats_container.pack(fill="x")
 
     def actualizar_stats_display():
         total_gastos, gastos_hoy_count, gastos_hoy_valor, total_registros = calcular_estadisticas_gastos()
-        
-        # Limpiar estadísticas anteriores
+
         for widget in stats_container.winfo_children():
             widget.destroy()
-        
+
         stats_data = [
-            ("💰", "Total Gastos", f"${total_gastos:,.0f}", "#FF6B6B"),
-            ("📅", "Gastos Hoy", f"${gastos_hoy_valor:,.0f}", "#4ECDC4"),
-            ("📋", "Total Registros", str(total_registros), "#45B7D1"),
-            ("🔢", "Registros Hoy", str(gastos_hoy_count), "#96CEB4")
+            ("Total gastos", f"${total_gastos:,.0f}", T.STAT_1),
+            ("Gastos hoy", f"${gastos_hoy_valor:,.0f}", T.STAT_3),
+            ("Registros", str(total_registros), T.STAT_2),
+            ("Registros hoy", str(gastos_hoy_count), T.STAT_4),
         ]
 
-        for i, (icono, titulo, valor, color) in enumerate(stats_data):
-            card = tk.Frame(stats_container, bg="white", relief="raised", bd=2, width=200, height=100)
-            card.pack(side="left", padx=15, pady=5)
-            card.pack_propagate(False)
-
-            card_header = tk.Frame(card, bg=color, height=25)
-            card_header.pack(fill="x")
-
-            card_content = tk.Frame(card, bg="white")
-            card_content.pack(fill="both", expand=True, padx=10, pady=10)
-
-            tk.Label(card_content, text=icono, font=("Segoe UI Emoji", 20), bg="white").pack()
-            tk.Label(card_content, text=titulo, font=("Segoe UI", 9, "bold"), 
-                    bg="white", fg="#666").pack()
-            tk.Label(card_content, text=valor, font=("Segoe UI", 12, "bold"), 
-                    bg="white", fg=color).pack()
+        for titulo, valor, accent in stats_data:
+            card = tk.Frame(stats_container, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+            card.pack(side="left", padx=(0, 10), pady=2, fill="both", expand=True)
+            tk.Frame(card, bg=accent, height=4).pack(fill="x")
+            inner = tk.Frame(card, bg=T.BG_CARD)
+            inner.pack(fill="both", expand=True, padx=12, pady=10)
+            tk.Label(inner, text=titulo, font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED).pack(anchor="w")
+            tk.Label(inner, text=valor, font=F_STAT, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", pady=(2, 0))
 
     actualizar_stats_display()
 
-    # 🎀 Panel de formulario
-    form_frame = tk.Frame(ventana, bg="#FFC0CB", relief="raised", bd=2)
-    form_frame.pack(fill="x", pady=15, padx=10)
+    form_outer = tk.Frame(cuerpo, bg=T.BG_APP)
+    form_outer.pack(fill="x", pady=(4, 0), padx=16)
+    form_frame = tk.Frame(form_outer, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    form_frame.pack(fill="x")
+    tk.Frame(form_frame, bg=T.ACCENT, height=3).pack(fill="x")
 
-    tk.Label(form_frame, text="✏️ Registrar Nuevo Gasto", font=("Segoe UI", 14, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack(pady=15)
+    tk.Label(form_frame, text="Registrar gasto", font=F_HEAD, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=16, pady=(12, 4))
 
-    # Contenedor del formulario
-    form_container = tk.Frame(form_frame, bg="#FFC0CB")
-    form_container.pack(pady=10, padx=30)
+    form_container = tk.Frame(form_frame, bg=T.BG_CARD)
+    form_container.pack(pady=(0, 12), padx=16, fill="x")
 
-    # Primera fila - Concepto y Valor
-    row1 = tk.Frame(form_container, bg="#FFC0CB")
-    row1.pack(fill="x", pady=10)
+    row1 = tk.Frame(form_container, bg=T.BG_CARD)
+    row1.pack(fill="x", pady=6)
 
-    tk.Label(row1, text="📝 Concepto:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack(side="left", padx=(0, 10))
-    concepto_entry = tk.Entry(row1, textvariable=concepto_var, font=("Segoe UI", 11), 
-                             width=25, relief="solid", bd=1)
-    concepto_entry.pack(side="left", padx=(0, 30))
+    tk.Label(row1, text="Concepto", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).pack(side="left", padx=(0, 10))
+    concepto_entry = tk.Entry(
+        row1, textvariable=concepto_var, font=F_BODY, width=28, relief="flat", bd=0,
+        highlightthickness=1, highlightbackground=T.INPUT_BORDER, highlightcolor=T.ACCENT,
+    )
+    concepto_entry.pack(side="left", padx=(0, 20), ipady=4)
 
-    tk.Label(row1, text="💰 Valor:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack(side="left", padx=(0, 10))
-    valor_entry = tk.Entry(row1, textvariable=valor_var, font=("Segoe UI", 11), 
-                          width=20, relief="solid", bd=1)
-    valor_entry.pack(side="left")
+    tk.Label(row1, text="Valor (COP)", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).pack(side="left", padx=(0, 10))
+    valor_entry = tk.Entry(
+        row1, textvariable=valor_var, font=F_BODY, width=16, relief="flat", bd=0,
+        highlightthickness=1, highlightbackground=T.INPUT_BORDER, highlightcolor=T.ACCENT,
+    )
+    valor_entry.pack(side="left", ipady=4)
 
-    # Segunda fila - Fecha y botones
-    row2 = tk.Frame(form_container, bg="#FFC0CB")
-    row2.pack(fill="x", pady=15)
+    row2 = tk.Frame(form_container, bg=T.BG_CARD)
+    row2.pack(fill="x", pady=10)
 
-    tk.Label(row2, text="📅 Fecha:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack(side="left", padx=(0, 10))
-    fecha_entry = tk.Entry(row2, textvariable=fecha_var, font=("Segoe UI", 11), 
-                          width=15, state="readonly", relief="solid", bd=1)
-    fecha_entry.pack(side="left", padx=(0, 50))
+    tk.Label(row2, text="Fecha", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).pack(side="left", padx=(0, 10))
+    fecha_entry = tk.Entry(
+        row2, textvariable=fecha_var, font=F_BODY, width=14, state="readonly", readonlybackground=T.INPUT_BG_ALT,
+        relief="flat", bd=0, highlightthickness=1, highlightbackground=T.INPUT_BORDER,
+    )
+    fecha_entry.pack(side="left", padx=(0, 24), ipady=4)
 
     # Botones de acción
     def ingresar_gasto():
         if not concepto_var.get().strip():
-            messagebox.showwarning("⚠️ Campo Vacío", "💖 Por favor ingresa un concepto para el gasto")
+            messagebox.showwarning("Campo vacío", "Ingrese un concepto para el gasto.", parent=ventana)
             concepto_entry.focus()
             return
         
@@ -280,13 +268,14 @@ def iniciar_gastos():
             if valor <= 0:
                 raise ValueError("El valor debe ser mayor a 0")
         except ValueError:
-            messagebox.showwarning("⚠️ Valor Inválido", "💖 Por favor ingresa un valor numérico válido")
+            messagebox.showwarning("Valor inválido", "Ingrese un valor numérico válido mayor a cero.", parent=ventana)
             valor_entry.focus()
             return
 
         # Agregar gasto a la base de datos
         hora_actual = datetime.now().strftime("%H:%M:%S")
-        if agregar_gasto_db(concepto_var.get().strip(), valor, fecha_var.get(), hora_actual):
+        concepto_txt = concepto_var.get().strip()
+        if agregar_gasto_db(concepto_txt, valor, fecha_var.get(), hora_actual):
             # Actualizar tabla y estadísticas
             actualizar_tabla()
             actualizar_stats_display()
@@ -296,19 +285,23 @@ def iniciar_gastos():
             valor_var.set("")
             concepto_entry.focus()
             
-            messagebox.showinfo("✅ Éxito", f"💎 Gasto registrado exitosamente!\n\n"
-                                          f"📝 Concepto: {concepto_var.get().strip()}\n"
-                                          f"💰 Valor: ${valor:,.0f}")
+            messagebox.showinfo(
+                "Gasto registrado",
+                f"Concepto: {concepto_txt}\nValor: ${valor:,.0f}",
+                parent=ventana,
+            )
 
     def eliminar_gasto():
         seleccionado = tabla.focus()
         if not seleccionado:
-            messagebox.showwarning("⚠️ Selección", "💖 Por favor selecciona un gasto para eliminar")
+            messagebox.showwarning("Selección", "Seleccione un gasto en la tabla para eliminarlo.", parent=ventana)
             return
         
-        respuesta = messagebox.askyesno("🗑️ Confirmar Eliminación", 
-                                       "¿Estás segura de que deseas eliminar este gasto?\n\n"
-                                       "⚠️ Esta acción no se puede deshacer.")
+        respuesta = messagebox.askyesno(
+            "Confirmar eliminación",
+            "¿Eliminar este gasto? Esta acción no se puede deshacer.",
+            parent=ventana,
+        )
         if respuesta:
             # Obtener ID del gasto seleccionado
             valores = tabla.item(seleccionado)["values"]
@@ -317,12 +310,12 @@ def iniciar_gastos():
             if eliminar_gasto_db(id_gasto):
                 actualizar_tabla()
                 actualizar_stats_display()
-                messagebox.showinfo("✅ Eliminado", "💖 Gasto eliminado exitosamente")
+                messagebox.showinfo("Eliminado", "Gasto eliminado correctamente.", parent=ventana)
 
     def modificar_gasto():
         seleccionado = tabla.focus()
         if not seleccionado:
-            messagebox.showwarning("⚠️ Selección", "💖 Por favor selecciona un gasto para modificar")
+            messagebox.showwarning("Selección", "Seleccione un gasto en la tabla para modificarlo.", parent=ventana)
             return
         
         # Obtener datos del gasto seleccionado
@@ -331,35 +324,35 @@ def iniciar_gastos():
         
         # Ventana de modificación
         ventana_mod = tk.Toplevel(ventana)
-        ventana_mod.title("✏️ Modificar Gasto")
-        ventana_mod.geometry("450x300")
-        ventana_mod.configure(bg="#FFE4F1")
+        ventana_mod.title("Modificar gasto · VmPOS")
+        ventana_mod.configure(bg=T.BG_APP)
         ventana_mod.resizable(False, False)
-        
-        # Centrar ventana
         ventana_mod.transient(ventana)
         ventana_mod.grab_set()
-        
-        tk.Label(ventana_mod, text="✏️ MODIFICAR GASTO", font=("Segoe UI", 16, "bold"), 
-                bg="#FFE4F1", fg="#C71585").pack(pady=20)
+        centrar_ventana(ventana_mod, 450, 300, ventana)
+
+        hdr_m = tk.Frame(ventana_mod, bg=T.POS_HEADER, height=52)
+        hdr_m.pack(fill="x")
+        hdr_m.pack_propagate(False)
+        tk.Label(hdr_m, text="Modificar gasto", font=F_HEAD, bg=T.POS_HEADER, fg=T.WHITE).pack(
+            side=tk.LEFT, padx=16, pady=12
+        )
         
         # Variables para modificación
         mod_concepto = tk.StringVar(value=valores[1])
         mod_valor = tk.StringVar(value=str(float(valores[2].replace('$', '').replace(',', ''))))
         
         # Campos de modificación
-        campos_frame = tk.Frame(ventana_mod, bg="#FFE4F1")
-        campos_frame.pack(pady=20, padx=30)
-        
-        tk.Label(campos_frame, text="📝 Concepto:", font=("Segoe UI", 11, "bold"), 
-                bg="#FFE4F1", fg="#8B0054").pack(anchor="w", pady=(0, 5))
-        tk.Entry(campos_frame, textvariable=mod_concepto, font=("Segoe UI", 11), 
-                width=40).pack(fill="x", pady=(0, 15))
-        
-        tk.Label(campos_frame, text="💰 Valor:", font=("Segoe UI", 11, "bold"), 
-                bg="#FFE4F1", fg="#8B0054").pack(anchor="w", pady=(0, 5))
-        tk.Entry(campos_frame, textvariable=mod_valor, font=("Segoe UI", 11), 
-                width=40).pack(fill="x", pady=(0, 20))
+        campos_frame = tk.Frame(ventana_mod, bg=T.BG_APP)
+        campos_frame.pack(pady=16, padx=20, fill="x")
+
+        tk.Label(campos_frame, text="Concepto", font=F_BODY_B, bg=T.BG_APP, fg=T.TEXT).pack(anchor="w", pady=(0, 4))
+        tk.Entry(campos_frame, textvariable=mod_concepto, font=F_BODY, width=42, relief="flat", highlightthickness=1,
+                 highlightbackground=T.INPUT_BORDER).pack(fill="x", pady=(0, 12), ipady=4)
+
+        tk.Label(campos_frame, text="Valor (COP)", font=F_BODY_B, bg=T.BG_APP, fg=T.TEXT).pack(anchor="w", pady=(0, 4))
+        tk.Entry(campos_frame, textvariable=mod_valor, font=F_BODY, width=42, relief="flat", highlightthickness=1,
+                 highlightbackground=T.INPUT_BORDER).pack(fill="x", pady=(0, 8), ipady=4)
         
         def guardar_cambios():
             try:
@@ -371,56 +364,66 @@ def iniciar_gastos():
                     actualizar_tabla()
                     actualizar_stats_display()
                     ventana_mod.destroy()
-                    messagebox.showinfo("✅ Modificado", "💖 Gasto modificado exitosamente")
+                    messagebox.showinfo("Modificado", "Gasto actualizado correctamente.", parent=ventana)
                 
             except ValueError as e:
-                messagebox.showwarning("⚠️ Error", "💖 Por favor ingresa un valor numérico válido")
-        
-        # Botones
-        btn_frame = tk.Frame(ventana_mod, bg="#FFE4F1")
-        btn_frame.pack(pady=20)
-        
-        tk.Button(btn_frame, text="💾 Guardar Cambios", command=guardar_cambios,
-                 bg="#32CD32", fg="white", font=("Segoe UI", 11, "bold"), 
-                 padx=20, pady=8, relief="flat", cursor="hand2").pack(side="left", padx=10)
-        
-        tk.Button(btn_frame, text="❌ Cancelar", command=ventana_mod.destroy,
-                 bg="#FF6B6B", fg="white", font=("Segoe UI", 11, "bold"), 
-                 padx=20, pady=8, relief="flat", cursor="hand2").pack(side="left", padx=10)
+                messagebox.showwarning("Valor inválido", "Ingrese un valor numérico válido.", parent=ventana_mod)
 
-    # Botones de acción
-    buttons_frame = tk.Frame(row2, bg="#FFC0CB")
+        btn_frame = tk.Frame(ventana_mod, bg=T.BG_APP)
+        btn_frame.pack(pady=(8, 16))
+
+        tk.Button(
+            btn_frame, text="Guardar", command=guardar_cambios,
+            bg=T.STAT_3, fg=T.WHITE, font=F_BODY_B, padx=18, pady=8, relief="flat", cursor="hand2",
+            activebackground=T.POS_BTN_GO_HOVER, activeforeground=T.WHITE,
+        ).pack(side="left", padx=(0, 8))
+
+        tk.Button(
+            btn_frame, text="Cancelar", command=ventana_mod.destroy,
+            bg=T.POS_BTN_ALT, fg=T.WHITE, font=F_BODY_B, padx=18, pady=8, relief="flat", cursor="hand2",
+            activebackground=T.TEXT_MUTED, activeforeground=T.WHITE,
+        ).pack(side="left", padx=8)
+
+    buttons_frame = tk.Frame(row2, bg=T.BG_CARD)
     buttons_frame.pack(side="right")
 
-    btn_ingresar = tk.Button(buttons_frame, text="💎 Ingresar", command=ingresar_gasto,
-                            bg="#32CD32", fg="white", font=("Segoe UI", 11, "bold"), 
-                            padx=15, pady=8, relief="flat", cursor="hand2")
-    btn_ingresar.pack(side="left", padx=5)
+    btn_ingresar = tk.Button(
+        buttons_frame, text="Ingresar gasto", command=ingresar_gasto,
+        bg=T.STAT_3, fg=T.WHITE, font=F_BODY_B, padx=14, pady=8, relief="flat", cursor="hand2",
+        activebackground=T.POS_BTN_GO_HOVER, activeforeground=T.WHITE,
+    )
+    btn_ingresar.pack(side="left", padx=4)
 
-    btn_eliminar = tk.Button(buttons_frame, text="🗑️ Eliminar", command=eliminar_gasto,
-                            bg="#FF6B6B", fg="white", font=("Segoe UI", 11, "bold"), 
-                            padx=15, pady=8, relief="flat", cursor="hand2")
-    btn_eliminar.pack(side="left", padx=5)
+    btn_eliminar = tk.Button(
+        buttons_frame, text="Eliminar", command=eliminar_gasto,
+        bg=T.DANGER, fg=T.WHITE, font=F_BODY_B, padx=14, pady=8, relief="flat", cursor="hand2",
+        activebackground="#b91c1c", activeforeground=T.WHITE,
+    )
+    btn_eliminar.pack(side="left", padx=4)
 
-    btn_modificar = tk.Button(buttons_frame, text="✏️ Modificar", command=modificar_gasto,
-                             bg="#4ECDC4", fg="white", font=("Segoe UI", 11, "bold"), 
-                             padx=15, pady=8, relief="flat", cursor="hand2")
-    btn_modificar.pack(side="left", padx=5)
+    btn_modificar = tk.Button(
+        buttons_frame, text="Modificar", command=modificar_gasto,
+        bg=T.STAT_1, fg=T.WHITE, font=F_BODY_B, padx=14, pady=8, relief="flat", cursor="hand2",
+        activebackground="#0284c7", activeforeground=T.WHITE,
+    )
+    btn_modificar.pack(side="left", padx=4)
 
-    # 🔍 Panel de búsqueda
-    search_frame = tk.Frame(ventana, bg="#FFE4F1")
-    search_frame.pack(fill="x", pady=10, padx=10)
+    search_outer = tk.Frame(cuerpo, bg=T.BG_APP)
+    search_outer.pack(fill="x", pady=(8, 0), padx=16)
+    search_frame = tk.Frame(search_outer, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    search_frame.pack(fill="x")
+    tk.Frame(search_frame, bg=T.STAT_1, height=3).pack(fill="x")
+    search_container = tk.Frame(search_frame, bg=T.BG_CARD)
+    search_container.pack(fill="x", padx=12, pady=10)
 
-    search_container = tk.Frame(search_frame, bg="#FFE4F1")
-    search_container.pack()
+    tk.Label(search_container, text="Buscar", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).pack(side="left", padx=(0, 10))
 
-    tk.Label(search_container, text="🔍 Buscar:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFE4F1", fg="#C71585").pack(side="left", padx=(0, 10))
-    
     search_var = tk.StringVar()
-    search_entry = tk.Entry(search_container, textvariable=search_var, font=("Segoe UI", 11), 
-                           width=35, relief="solid", bd=1)
-    search_entry.pack(side="left", padx=(0, 10))
+    search_entry = tk.Entry(
+        search_container, textvariable=search_var, font=F_BODY, width=32, relief="flat", bd=0,
+        highlightthickness=1, highlightbackground=T.INPUT_BORDER,
+    )
+    search_entry.pack(side="left", padx=(0, 10), ipady=4)
 
     def buscar_gastos():
         busqueda = search_var.get().lower()
@@ -430,12 +433,17 @@ def iniciar_gastos():
         
         # Filtrar gastos en la base de datos
         try:
-            cursor.execute("""
-                SELECT * FROM gastos 
-                WHERE LOWER(concepto) LIKE ? OR CAST(valor AS TEXT) LIKE ? OR fecha LIKE ?
-                ORDER BY fecha_registro DESC
-            """, (f'%{busqueda}%', f'%{busqueda}%', f'%{busqueda}%'))
-            gastos_filtrados = cursor.fetchall()
+            with sqlite3.connect(ruta_db) as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT * FROM gastos
+                    WHERE LOWER(concepto) LIKE ? OR CAST(valor AS TEXT) LIKE ? OR fecha LIKE ?
+                    ORDER BY fecha_registro DESC
+                    """,
+                    (f"%{busqueda}%", f"%{busqueda}%", f"%{busqueda}%"),
+                )
+                gastos_filtrados = cur.fetchall()
             
             tabla.delete(*tabla.get_children())
             for gasto in gastos_filtrados:
@@ -449,42 +457,36 @@ def iniciar_gastos():
                 ), tags=(tag,))
                 
         except Exception as e:
-            messagebox.showerror("Error", f"Error al buscar gastos: {e}")
+            messagebox.showerror("Error", f"Error al buscar gastos: {e}", parent=ventana)
 
-    tk.Button(search_container, text="💖 Buscar", command=buscar_gastos,
-             bg="#FF69B4", fg="white", font=("Segoe UI", 10, "bold"), 
-             padx=15, pady=5, relief="flat", cursor="hand2").pack(side="left", padx=5)
+    tk.Button(
+        search_container, text="Buscar", command=buscar_gastos,
+        bg=T.STAT_2, fg=T.WHITE, font=F_BODY_B, padx=14, pady=6, relief="flat", cursor="hand2",
+        activebackground="#7c3aed", activeforeground=T.WHITE,
+    ).pack(side="left", padx=4)
 
-    tk.Button(search_container, text="🔄 Mostrar Todos", command=lambda: [search_var.set(""), actualizar_tabla()],
-             bg="#9370DB", fg="white", font=("Segoe UI", 10, "bold"), 
-             padx=15, pady=5, relief="flat", cursor="hand2").pack(side="left", padx=5)
+    tk.Button(
+        search_container, text="Mostrar todos", command=lambda: [search_var.set(""), actualizar_tabla()],
+        bg=T.POS_BTN_ALT, fg=T.WHITE, font=F_BODY_B, padx=14, pady=6, relief="flat", cursor="hand2",
+        activebackground=T.TEXT_MUTED, activeforeground=T.WHITE,
+    ).pack(side="left", padx=4)
 
-    # 📋 Tabla de gastos
-    table_frame = tk.Frame(ventana, bg="#FFE4F1")
-    table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    table_outer = tk.Frame(cuerpo, bg=T.BG_APP)
+    table_outer.pack(fill="both", expand=True, padx=16, pady=(12, 16))
 
-    tk.Label(table_frame, text="📋 Lista de Gastos Registrados", font=("Segoe UI", 14, "bold"), 
-             bg="#FFE4F1", fg="#C71585").pack(pady=(0, 10))
+    tk.Label(table_outer, text="Historial de gastos", font=F_HEAD, bg=T.BG_APP, fg=T.TEXT).pack(anchor="w", pady=(0, 8))
 
-    # Contenedor de tabla con scrollbars
-    table_container = tk.Frame(table_frame, bg="white", relief="raised", bd=2)
-    table_container.pack(fill="both", expand=True)
+    table_wrap = tk.Frame(table_outer, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    table_wrap.pack(fill="both", expand=True)
+    tk.Frame(table_wrap, bg=T.POS_HEADER, height=3).pack(fill="x")
+    table_container = tk.Frame(table_wrap, bg=T.BG_CARD)
+    table_container.pack(fill="both", expand=True, padx=4, pady=4)
 
-    # Configurar estilo de la tabla
     style = ttk.Style()
-    style.configure("Gastos.Treeview", 
-                   background="white",
-                   foreground="#333",
-                   rowheight=35,
-                   fieldbackground="white")
-    style.configure("Gastos.Treeview.Heading",
-                   background="#FF69B4",
-                   foreground="white",
-                   font=('Segoe UI', 11, 'bold'))
+    style_ttk_treeview_pos(style, T.BG_APP)
 
     columnas = ("ID", "Concepto", "Valor", "Fecha", "Hora")
-    tabla = ttk.Treeview(table_container, columns=columnas, show="headings", 
-                        height=10, style="Gastos.Treeview")
+    tabla = ttk.Treeview(table_container, columns=columnas, show="headings", height=10)
 
     # Configurar columnas
     widths = [60, 300, 120, 100, 80]
@@ -541,19 +543,19 @@ def iniciar_gastos():
             ), tags=(tag,))
         
         # Configurar colores alternos
-        tabla.tag_configure("even", background="#FFF0F5")
-        tabla.tag_configure("odd", background="white")
+        tabla.tag_configure("even", background=T.BG_SUBTLE)
+        tabla.tag_configure("odd", background=T.BG_CARD)
 
     # Cargar datos iniciales
     actualizar_tabla()
 
-    # 🌟 Footer
-    footer_frame = tk.Frame(ventana, bg="#FF1493", height=50)
-    footer_frame.pack(fill="x")
-    footer_frame.pack_propagate(False)
-
-    tk.Label(footer_frame, text="💎 Control de Gastos • Base de Datos Conectada 💎", 
-             font=("Segoe UI", 11, "bold"), bg="#FF1493", fg="white").pack(expand=True, pady=15)
+    tk.Label(
+        footer_frame,
+        text="VmPOS · Gastos",
+        font=F_SMALL,
+        bg=T.FOOTER,
+        fg=T.HEADER_TEXT_DIM,
+    ).pack(expand=True, pady=14)
 
     # Enfocar el campo concepto al inicio
     concepto_entry.focus()
@@ -580,14 +582,15 @@ def iniciar_gastos():
     ventana.bind("<KeyPress>", keyboard_shortcuts)
     ventana.focus_set()
 
-    # Cerrar conexión al cerrar ventana
+    modulo_scroll_finalizar(cuerpo)
+
+    # Cerrar ventana
     def on_closing():
-        if conn:
-            conn.close()
         ventana.destroy()
 
     ventana.protocol("WM_DELETE_WINDOW", on_closing)
-    ventana.mainloop()
+    if parent is None:
+        ventana.mainloop()
 
 # Ejecutar si es llamado directamente
 if __name__ == "__main__":

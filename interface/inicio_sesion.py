@@ -11,8 +11,24 @@ from tkinter import ttk
 from tkinter import messagebox
 import sys
 import os
+import webbrowser
+from urllib.parse import quote
+
+# Soporte: WhatsApp (+57 320 771 6590)
+_WHATSAPP_AYUDA = "573207716590"
+_WHATSAPP_MSG_DEFAULT = "Hola, necesito ayuda con VmPOS."
+
+# Evita UnicodeEncodeError en consola Windows (emojis en prints de otros módulos)
+if sys.platform == "win32":
+    for stream in (getattr(sys, "stdout", None), getattr(sys, "stderr", None)):
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 # Configuración de rutas para PyInstaller
+
 if getattr(sys, 'frozen', False):
     # Si está ejecutándose como ejecutable
     BASE_DIR = sys._MEIPASS
@@ -24,6 +40,15 @@ else:
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, 'interface'))
 sys.path.insert(0, os.path.join(BASE_DIR, 'modules'))
+
+try:
+    from paths import ensure_runtime_databases
+    ensure_runtime_databases()
+except ImportError:
+    pass
+
+from layout_responsive import centrar_ventana
+from ui_theme import T, F_BODY, F_BODY_B, F_HEAD, F_SMALL, F_SUB, F_TITLE
 
 # Importaciones con manejo de errores
 try:
@@ -48,29 +73,12 @@ try:
     )
 except ImportError as e:
     print(f"Error importando usuarios_db: {e}")
-    # Funciones de respaldo
     def obtener_usuario_por_credenciales(usuario, password):
-        # Sistema de respaldo con usuarios hardcodeados
-        usuarios_respaldo = {
-            'admin': {'usuario': 'admin', 'rol': 'Administrador', 'id': 1, 'estado': 'Activo'},
-            'eduardo': {'usuario': 'eduardo', 'rol': 'Administrador', 'id': 2, 'estado': 'Activo'},
-            'andres': {'usuario': 'andres', 'rol': 'Vendedor', 'id': 3, 'estado': 'Activo'}
-        }
-        passwords_respaldo = {
-            'admin': 'admin123',
-            'eduardo': '2121',
-            'andres': '2180'
-        }
-        
-        if usuario in usuarios_respaldo and passwords_respaldo.get(usuario) == password:
-            return usuarios_respaldo[usuario]
         return None
-    
     def crear_tablas_iniciales():
-        print("Función crear_tablas_iniciales no disponible")
-    
+        print("crear_tablas_iniciales no disponible (fallo al importar usuarios_db)")
     def inicializar_admin_default():
-        print("Función inicializar_admin_default no disponible")
+        print("inicializar_admin_default no disponible (fallo al importar usuarios_db)")
 
 # --- Variables necesarias (telefono es estático) ---
 telefono = "+573215545788"
@@ -91,66 +99,53 @@ def mostrar_alerta_bonita(titulo, mensaje, tipo="error"):
     Muestra una ventana de alerta personalizada con un estilo moderno.
     """
     alerta = tk.Toplevel()
-    alerta.title("💫 Notificación")
-    alerta.geometry("400x280")
-    alerta.configure(bg="#FCE4EC") # Rosa muy claro de fondo de alerta
+    alerta.title("Notificación")
+    alerta.configure(bg=T.BG_APP)
     alerta.resizable(False, False)
-    alerta.grab_set()    # Hacer modal
+    alerta.grab_set()
+    centrar_ventana(alerta, 400, 280)
     
-    # Centrar alerta
-    alerta.update_idletasks()
-    x = (alerta.winfo_screenwidth() // 2) - (400 // 2)
-    y = (alerta.winfo_screenheight() // 2) - (280 // 2)
-    alerta.geometry(f"400x280+{x}+{y}")
-    
-    # Colores según tipo
     if tipo == "error":
-        color_header = "#FF8A80" # Rojo/rosa suave para error
-        icono = "⚠️"
-        color_boton = "#F44336"
+        color_header = T.DANGER
+        icono = "⚠"
+        color_boton = T.DANGER
     elif tipo == "warning":
-        color_header = "#FFD180" # Naranja/amarillo suave para advertencia
-        icono = "💡"
-        color_boton = "#FFAB40"
-    else: # success
-        color_header = "#A7FFEB" # Verde/azul suave para éxito
-        icono = "✅"
-        color_boton = "#69F0AE"
+        color_header = T.WARN
+        icono = "!"
+        color_boton = T.WARN
+    else:
+        color_header = T.SUCCESS
+        icono = "✓"
+        color_boton = T.SUCCESS
     
-    # Marco principal
-    main_frame = tk.Frame(alerta, bg="white", bd=2, relief="solid")
-    main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+    main_frame = tk.Frame(alerta, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    main_frame.pack(fill="both", expand=True, padx=16, pady=16)
     
-    # Header colorido
-    header_frame = tk.Frame(main_frame, bg=color_header, height=80)
+    header_frame = tk.Frame(main_frame, bg=color_header, height=72)
     header_frame.pack(fill="x")
     header_frame.pack_propagate(False)
     
-    tk.Label(header_frame, text=icono, font=("Segoe UI Emoji", 32), 
-             bg=color_header, fg="white").pack(pady=(15, 5))
-    tk.Label(header_frame, text=titulo, font=("Segoe UI", 14, "bold"), 
-             bg=color_header, fg="white").pack()
+    tk.Label(header_frame, text=icono, font=("Segoe UI", 22, "bold"), bg=color_header, fg=T.WHITE).pack(pady=(12, 2))
+    tk.Label(header_frame, text=titulo, font=F_SUB, bg=color_header, fg=T.WHITE).pack()
     
-    # Contenido del mensaje
-    content_frame = tk.Frame(main_frame, bg="white")
-    content_frame.pack(expand=True, fill="both", padx=30, pady=30)
+    content_frame = tk.Frame(main_frame, bg=T.BG_CARD)
+    content_frame.pack(expand=True, fill="both", padx=24, pady=20)
     
-    tk.Label(content_frame, text=mensaje, font=("Segoe UI", 12), 
-             bg="white", fg="#2d3436", wraplength=300, justify="center").pack(expand=True)
+    tk.Label(content_frame, text=mensaje, font=F_BODY, 
+             bg=T.BG_CARD, fg=T.TEXT, wraplength=300, justify="center").pack(expand=True)
     
-    # Botón de cerrar
     def cerrar_alerta():
         alerta.destroy()
     
-    btn_cerrar = tk.Button(content_frame, text="💖 Entendido", 
-                             font=("Segoe UI", 11, "bold"), bg=color_boton, fg="white",
-                             bd=0, pady=8, cursor="hand2", command=cerrar_alerta,
-                             relief="flat", width=20)
-    btn_cerrar.pack(pady=(10, 0))
+    btn_cerrar = tk.Button(content_frame, text="Aceptar", 
+                             font=F_BODY_B, bg=color_boton, fg=T.WHITE,
+                             bd=0, pady=10, cursor="hand2", command=cerrar_alerta,
+                             activebackground=T.TEXT, activeforeground=T.WHITE,
+                             relief="flat", width=18)
+    btn_cerrar.pack(pady=(12, 0))
     
-    # Efectos hover
     def on_enter(e):
-        btn_cerrar.config(bg="#9E9E9E") # Gris suave para hover
+        btn_cerrar.config(bg=T.ACCENT_HOVER if tipo == "success" else T.TEXT)
     def on_leave(e):
         btn_cerrar.config(bg=color_boton)
     
@@ -174,11 +169,11 @@ def validar_campos():
     clave = pass_var.get().strip()
     
     # Limpiar estilos previos
-    user_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
-    pass_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
+    user_frame.config(bg=T.INPUT_BG_ALT, bd=1, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
+    pass_frame.config(bg=T.INPUT_BG_ALT, bd=1, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
     
     if not usuario:
-        user_frame.config(bg="#FFCDD2", bd=3) # Rosa más fuerte para error
+        user_frame.config(bg=T.DANGER_BG, bd=1, highlightbackground=T.DANGER, highlightthickness=1)
         mostrar_alerta_bonita(
             "¡Ups! Campo vacío 😊",
             "Por favor, ingresa tu nombre de usuario.\n\n¡No te olvides de este importante detalle!",
@@ -188,7 +183,7 @@ def validar_campos():
         return False, None
     
     if not clave:
-        pass_frame.config(bg="#FFCDD2", bd=3) # Rosa más fuerte para error
+        pass_frame.config(bg=T.DANGER_BG, bd=1, highlightbackground=T.DANGER, highlightthickness=1)
         mostrar_alerta_bonita(
             "¡Falta algo! 🔐",
             "La contraseña es necesaria para acceder.\n\n¡Solo un paso más para continuar!",
@@ -216,8 +211,8 @@ def validar_campos():
         else:
             print(f"❌ Autenticación fallida para usuario: {usuario}")
             # Si no se encuentra el usuario con esas credenciales
-            user_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
-            pass_frame.config(bg="#FF8A80", bd=3) # Rojo/rosa suave para error
+            user_frame.config(bg=T.DANGER_BG, bd=1, highlightbackground=T.DANGER, highlightthickness=1)
+            pass_frame.config(bg=T.DANGER_BG, bd=1, highlightbackground=T.DANGER, highlightthickness=1)
             mostrar_alerta_bonita(
                 "Credenciales incorrectas 🔒",
                 "Usuario o contraseña no coinciden.\n\n¡Verifica tus datos e inténtalo de nuevo!",
@@ -269,6 +264,27 @@ def validar_usuario(event=None):
     if not es_valido:
         return
 
+    try:
+        from license_remote import remote_license_screening
+
+        allow_lr, tit_lr, msg_lr = remote_license_screening()
+        if not allow_lr:
+            # Si la licencia fue desactivada en el dashboard, permitir acceso limitado:
+            # entra al menú principal, pero módulos bloqueados y aviso de renovación.
+            if (tit_lr or "").strip().lower() == "acceso desactivado":
+                if isinstance(datos_usuario, dict):
+                    datos_usuario["license_limited"] = True
+                    datos_usuario["license_notice_title"] = "Tu licencia ha vencido"
+                    datos_usuario["license_notice_message"] = (
+                        "Tu licencia ha vencido. Si quieres renovarla, escríbenos por WhatsApp."
+                    )
+                    datos_usuario["license_notice_whatsapp"] = "3207716590"
+            else:
+                mostrar_alerta_bonita(tit_lr or "VmPOS", msg_lr, "error")
+                return
+    except Exception as ex_lr:
+        print(f"VmPOS: verificación remota omitida o error: {ex_lr}")
+
     usuario_actual = datos_usuario['usuario'].capitalize()
 
     # Mostrar confirmación exitosa
@@ -284,193 +300,247 @@ def validar_usuario(event=None):
 
 def limpiar_campos():
     """Limpiar campos de entrada"""
-    usuario_var.set("")
+    user_var.set("")
     pass_var.set("")
-    user_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
-    pass_frame.config(bg="#F3E5F5", bd=2) # Morado muy claro
+    user_frame.config(bg=T.INPUT_BG_ALT, bd=1, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
+    pass_frame.config(bg=T.INPUT_BG_ALT, bd=1, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
     entry_user.focus()
 
-def mostrar_info_usuarios():
-    """Muestra información sobre usuarios disponibles (solo para desarrollo/demo)"""
-    mensaje = """Usuarios disponibles en el sistema:
-    
-👤 admin / admin123 (Administrador)
-👤 eduardo / 2121 (Administrador) 
-👤 andres / 2180 (Vendedor)
-👤 gerente / manager (Gerente)
-
-Los usuarios se gestionan desde el menú principal."""
-    
-    mostrar_alerta_bonita(
-        "Información de Usuarios 👥",
-        mensaje,
-        "warning"
-    )
+def abrir_ayuda_whatsapp():
+    """Abre una conversación de WhatsApp con soporte (navegador o app)."""
+    try:
+        url = f"https://wa.me/{_WHATSAPP_AYUDA}?text={quote(_WHATSAPP_MSG_DEFAULT)}"
+        webbrowser.open(url)
+    except Exception as e:
+        messagebox.showerror(
+            "Ayuda",
+            f"No se pudo abrir WhatsApp automáticamente.\n\n"
+            f"Escribe al nombre: Cliente_\n\n({e})",
+        )
 
 def on_enter_button(event):
-    event.widget.config(bg="#C2185B") # Rosa oscuro al pasar el ratón
+    event.widget.config(bg=T.ACCENT_HOVER)
 
 def on_leave_button(event):
-    event.widget.config(bg="#E91E63") # Rosa brillante
+    event.widget.config(bg=T.ACCENT)
 
 def on_enter_clear(event):
-    event.widget.config(bg="#7B1FA2") # Morado más oscuro al pasar el ratón
+    event.widget.config(bg=T.NAV_BAR_BTN_HOVER)
 
 def on_leave_clear(event):
-    event.widget.config(bg="#AB47BC") # Morado más suave
+    event.widget.config(bg=T.NAV_BAR_BTN)
 
 def on_enter_info(event):
-    event.widget.config(bg="#5E35B1") # Morado más oscuro para info
+    event.widget.config(bg=T.SIDEBAR_HOVER)
 
 def on_leave_info(event):
-    event.widget.config(bg="#7E57C2") # Morado medio
+    event.widget.config(bg=T.SIDEBAR)
 
 # Inicializar sistema al arrancar
 inicializar_sistema()
 
 # 🖼️ Ventana principal
 ventana = tk.Tk()
-ventana.title("VmPOS - Centro de Copiado y Papelería")
-ventana.geometry("900x500")
-ventana.configure(bg="#F8BBD0") # Rosa claro como fondo principal
-ventana.resizable(False, False)
-
-# Centrar ventana
+ventana.title("VmPOS · Inicio de sesión")
+ventana.configure(bg=T.BG_APP)
+ventana.resizable(True, True)
+ventana.minsize(720, 560)
 ventana.update_idletasks()
-x = (ventana.winfo_screenwidth() // 2) - (900 // 2)
-y = (ventana.winfo_screenheight() // 2) - (500 // 2)
-ventana.geometry(f"900x500+{x}+{y}")
+_sw = ventana.winfo_screenwidth()
+_sh = ventana.winfo_screenheight()
+_w = min(1020, max(720, int(_sw * 0.88)))
+_h = min(820, max(560, int(_sh * 0.82)))
+centrar_ventana(ventana, _w, _h)
 
-# 🎨 Marco principal con colores combinados
-main_frame = tk.Frame(ventana, bg="#FCE4EC") # Rosa muy claro para el marco principal
-main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+main_frame = tk.Frame(ventana, bg=T.BG_APP)
+main_frame.pack(fill="both", expand=True, padx=32, pady=24)
 
-# 📄 Sección izquierda - Información del negocio
-left_frame = tk.Frame(main_frame, bg="#E1BEE7", width=400) # Lavanda claro
-left_frame.pack(side="left", fill="y", padx=(0, 10))
+left_frame = tk.Frame(main_frame, bg=T.SIDEBAR, width=400)
+left_frame.pack(side="left", fill="y", padx=(0, 16))
 left_frame.pack_propagate(False)
 
-# Header con iconos de papelería
-header_frame = tk.Frame(left_frame, bg="#AB47BC", height=80) # Morado vibrante
-header_frame.pack(fill="x", pady=(0, 20))
+header_frame = tk.Frame(left_frame, bg=T.SIDEBAR, height=64)
+header_frame.pack(fill="x")
 header_frame.pack_propagate(False)
+tk.Label(
+    header_frame,
+    text="VmPOS",
+    font=F_TITLE,
+    bg=T.SIDEBAR,
+    fg=T.WHITE,
+    anchor="w",
+).pack(side="left", padx=24, pady=20)
 
-# Iconos creativos para papelería
-icons_text = "📄 ✂️ 📎 🖊️ 📚"
-tk.Label(header_frame, text=icons_text, font=("Segoe UI Emoji", 20), 
-         bg="#AB47BC", fg="white").pack(pady=15)
+tk.Label(
+    left_frame,
+    text="Centro de copiado",
+    font=F_HEAD,
+    bg=T.SIDEBAR,
+    fg=T.WHITE,
+    anchor="w",
+).pack(anchor="w", padx=24, pady=(8, 0))
+tk.Label(
+    left_frame,
+    text="y papelería",
+    font=F_SUB,
+    bg=T.SIDEBAR,
+    fg=T.HEADER_TEXT_DIM,
+    anchor="w",
+).pack(anchor="w", padx=24, pady=(0, 20))
 
-# Logo y nombre del negocio
-tk.Label(left_frame, text="VmPOS", font=("Segoe UI", 32, "bold"), 
-         bg="#E1BEE7", fg="#4A148C").pack(pady=(10, 5)) # Morado oscuro para texto principal
-
-tk.Label(left_frame, text="CENTRO DE COPIADO", font=("Segoe UI", 15, "bold"), 
-         bg="#E1BEE7", fg="#880E4F").pack() # Rosa oscuro para texto secundario
-
-tk.Label(left_frame, text="& PAPELERÍA", font=("Segoe UI", 15, "bold"), 
-         bg="#E1BEE7", fg="#880E4F").pack(pady=(0, 20)) # Rosa oscuro
-
-# Servicios ofrecidos
-services_frame = tk.Frame(left_frame, bg="#E1BEE7")
-services_frame.pack(pady=10)
+services_frame = tk.Frame(left_frame, bg=T.SIDEBAR)
+services_frame.pack(fill="x", padx=20, pady=8)
 
 services = [
-    "📋 Fotocopias a color y B/N",
-    "🖨️ Impresiones profesionales", 
-    "📘 Anillados y empastados",
-    "✏️ Útiles escolares y oficina",
-    "📱 Recargas y servicios"
+    "Fotocopias color y B/N",
+    "Impresiones y anillados",
+    "Útiles escolares y oficina",
+    "Material de arte y manualidades",
 ]
 
 for service in services:
-    tk.Label(services_frame, text=service, font=("Segoe UI", 11), 
-             bg="#E1BEE7", fg="#4A148C", anchor="w").pack(fill="x", pady=3) # Morado oscuro para servicios
+    tk.Label(
+        services_frame,
+        text="· " + service,
+        font=F_BODY,
+        bg=T.SIDEBAR,
+        fg=T.HEADER_TEXT_DIM,
+        anchor="w",
+    ).pack(fill="x", pady=4)
 
-# Información de contacto
-contact_frame = tk.Frame(left_frame, bg="#AB47BC") # Morado vibrante
-contact_frame.pack(side="bottom", fill="x", pady=(20, 0))
+contact_frame = tk.Frame(left_frame, bg=T.SIDEBAR_HOVER)
+contact_frame.pack(side="bottom", fill="x", pady=(24, 0))
 
-tk.Label(contact_frame, text="📍 Puerto Colombia", font=("Segoe UI", 12, "bold"), 
-         bg="#AB47BC", fg="white").pack(pady=8)
-tk.Label(contact_frame, text=f"📞 {telefono}", font=("Segoe UI", 12, "bold"), 
-         bg="#AB47BC", fg="#FFEB3B").pack(pady=(0, 12)) # Amarillo brillante para contacto
+tk.Label(
+    contact_frame,
+    text="Puerto Colombia",
+    font=F_BODY_B,
+    bg=T.SIDEBAR_HOVER,
+    fg=T.WHITE,
+).pack(anchor="w", padx=20, pady=(16, 4))
+tk.Label(
+    contact_frame,
+    text=telefono,
+    font=F_BODY,
+    bg=T.SIDEBAR_HOVER,
+    fg=T.ACCENT_SOFT,
+).pack(anchor="w", padx=20, pady=(0, 16))
 
-# 🔐 Sección derecha - Login
-right_frame = tk.Frame(main_frame, bg="white", width=450)
-right_frame.pack(side="right", fill="y")
+right_frame = tk.Frame(main_frame, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+right_frame.pack(side="right", fill="both", expand=True)
 right_frame.pack_propagate(False)
 
-# Header del login
-login_header = tk.Frame(right_frame, bg="#FF80AB", height=100) # Rosa fuerte
+login_header = tk.Frame(right_frame, bg=T.HEADER_BAR, height=88)
 login_header.pack(fill="x")
 login_header.pack_propagate(False)
 
-tk.Label(login_header, text="🔐", font=("Segoe UI Emoji", 32), 
-         bg="#FF80AB", fg="white").pack(pady=(12, 3))
-tk.Label(login_header, text="ACCESO AL SISTEMA", font=("Segoe UI", 16, "bold"), 
-         bg="#FF80AB", fg="white").pack()
+tk.Label(login_header, text="Acceso al sistema", font=F_HEAD, bg=T.HEADER_BAR, fg=T.WHITE).pack(
+    side="left", padx=28, pady=28
+)
 
-# Contenido del login
-login_content = tk.Frame(right_frame, bg="white")
-login_content.pack(expand=True, fill="both", padx=40, pady=25)
+login_content = tk.Frame(right_frame, bg=T.BG_CARD)
+login_content.pack(expand=True, fill="both", padx=40, pady=28)
 
-tk.Label(login_content, text="Inicia sesión para continuar ✨", 
-         font=("Segoe UI", 13), bg="white", fg="#616161").pack(pady=(0, 25)) # Gris oscuro
+tk.Label(
+    login_content,
+    text="Inicia sesión con tu usuario corporativo",
+    font=F_BODY,
+    bg=T.BG_CARD,
+    fg=T.TEXT_MUTED,
+).pack(anchor="w", pady=(0, 20))
 
-# Variables para los campos
 usuario_var = tk.StringVar()
 pass_var = tk.StringVar()
 
-# Campo usuario
-tk.Label(login_content, text="👤 USUARIO", font=("Segoe UI", 11, "bold"), 
-         bg="white", fg="#424242", anchor="w").pack(fill="x", pady=(0, 8)) # Gris muy oscuro
+tk.Label(login_content, text="Usuario", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT, anchor="w").pack(fill="x", pady=(0, 6))
 
-user_frame = tk.Frame(login_content, bg="#F3E5F5", bd=2, relief="solid") # Morado muy claro
-user_frame.pack(fill="x", pady=(0, 20))
+user_frame = tk.Frame(login_content, bg=T.INPUT_BG_ALT, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
+user_frame.pack(fill="x", pady=(0, 16))
 
-entry_user = tk.Entry(user_frame, textvariable=usuario_var, font=("Segoe UI", 13), 
-                      bg="#F3E5F5", bd=0, fg="#424242")
-entry_user.pack(fill="x", padx=12, pady=10)
+entry_user = tk.Entry(
+    user_frame,
+    textvariable=usuario_var,
+    font=F_SUB,
+    bg=T.INPUT_BG,
+    bd=0,
+    fg=T.TEXT,
+    insertbackground=T.TEXT,
+    highlightthickness=0,
+)
+entry_user.pack(fill="x", padx=14, pady=12)
 
-# Campo contraseña
-tk.Label(login_content, text="🔒 CONTRASEÑA", font=("Segoe UI", 11, "bold"), 
-         bg="white", fg="#424242", anchor="w").pack(fill="x", pady=(0, 8)) # Gris muy oscuro
+tk.Label(login_content, text="Contraseña", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT, anchor="w").pack(
+    fill="x", pady=(0, 6)
+)
 
-pass_frame = tk.Frame(login_content, bg="#F3E5F5", bd=2, relief="solid") # Morado muy claro
-pass_frame.pack(fill="x", pady=(0, 25))
+pass_frame = tk.Frame(login_content, bg=T.INPUT_BG_ALT, highlightbackground=T.INPUT_BORDER, highlightthickness=1)
+pass_frame.pack(fill="x", pady=(0, 24))
 
-entry_pass = tk.Entry(pass_frame, textvariable=pass_var, font=("Segoe UI", 13), 
-                      bg="#F3E5F5", bd=0, fg="#424242", show="*") # El atributo show="*" oculta los caracteres por seguridad.
-entry_pass.pack(fill="x", padx=12, pady=10)
+entry_pass = tk.Entry(
+    pass_frame,
+    textvariable=pass_var,
+    font=F_SUB,
+    bg=T.INPUT_BG,
+    bd=0,
+    fg=T.TEXT,
+    show="*",
+    insertbackground=T.TEXT,
+    highlightthickness=0,
+)
+entry_pass.pack(fill="x", padx=14, pady=12)
 
-# Botones personalizados
-btn_login = tk.Button(login_content, text="🚀 INICIAR SESIÓN", 
-                      font=("Segoe UI", 13, "bold"), bg="#E91E63", fg="white", # Rosa brillante
-                      bd=0, pady=12, cursor="hand2", command=validar_usuario,
-                      activebackground="#C2185B", relief="flat") # Rosa oscuro para activo
+btn_login = tk.Button(
+    login_content,
+    text="Iniciar sesión",
+    font=F_BODY_B,
+    bg=T.ACCENT,
+    fg=T.WHITE,
+    bd=0,
+    pady=12,
+    cursor="hand2",
+    command=validar_usuario,
+    activebackground=T.ACCENT_HOVER,
+    activeforeground=T.WHITE,
+    relief="flat",
+)
 btn_login.pack(fill="x", pady=(0, 12))
 
-# Marco para botones secundarios
-buttons_frame = tk.Frame(login_content, bg="white")
-buttons_frame.pack(fill="x", pady=(0, 10))
+buttons_frame = tk.Frame(login_content, bg=T.BG_CARD)
+buttons_frame.pack(fill="x", pady=(0, 8))
 
-# Fila superior de botones
-buttons_row1 = tk.Frame(buttons_frame, bg="white")
+buttons_row1 = tk.Frame(buttons_frame, bg=T.BG_CARD)
 buttons_row1.pack(fill="x", pady=(0, 8))
 
-btn_clear = tk.Button(buttons_row1, text="🧹 LIMPIAR", 
-                      font=("Segoe UI", 10, "bold"), bg="#AB47BC", fg="white", # Morado más suave
-                      bd=0, pady=8, cursor="hand2", command=limpiar_campos,
-                      relief="flat")
-btn_clear.pack(side="left", expand=True, fill="x", padx=(0, 5))
+btn_clear = tk.Button(
+    buttons_row1,
+    text="Limpiar",
+    font=F_BODY_B,
+    bg=T.NAV_BAR_BTN,
+    fg=T.WHITE,
+    bd=0,
+    pady=10,
+    cursor="hand2",
+    command=limpiar_campos,
+    activebackground=T.NAV_BAR_BTN_HOVER,
+    relief="flat",
+)
+btn_clear.pack(side="left", expand=True, fill="x", padx=(0, 6))
 
-btn_info = tk.Button(buttons_row1, text="👥 INFO", 
-                     font=("Segoe UI", 10, "bold"), bg="#7E57C2", fg="white", # Morado medio
-                     bd=0, pady=8, cursor="hand2", command=mostrar_info_usuarios,
-                     relief="flat")
-btn_info.pack(side="right", expand=True, fill="x", padx=(5, 0))
+btn_info = tk.Button(
+    buttons_row1,
+    text="Ayuda",
+    font=F_BODY_B,
+    bg=T.SIDEBAR,
+    fg=T.WHITE,
+    bd=0,
+    pady=10,
+    cursor="hand2",
+    command=abrir_ayuda_whatsapp,
+    activebackground=T.SIDEBAR_HOVER,
+    relief="flat",
+)
+btn_info.pack(side="right", expand=True, fill="x", padx=(6, 0))
 
-# Efectos hover para botones
 btn_login.bind("<Enter>", on_enter_button)
 btn_login.bind("<Leave>", on_leave_button)
 btn_clear.bind("<Enter>", on_enter_clear)
@@ -478,17 +548,17 @@ btn_clear.bind("<Leave>", on_leave_clear)
 btn_info.bind("<Enter>", on_enter_info)
 btn_info.bind("<Leave>", on_leave_info)
 
-# Footer con información de versión
-footer_frame = tk.Frame(right_frame, bg="#AB47BC", height=70) # Morado más suave
+footer_frame = tk.Frame(right_frame, bg=T.FOOTER, height=56)
 footer_frame.pack(side="bottom", fill="x")
 footer_frame.pack_propagate(False)
 
-tk.Label(footer_frame, text="✨ Versión Gratuita 3.1.0 - Base de Datos", 
-         font=("Segoe UI", 9, "bold"), bg="#AB47BC", fg="white").pack(pady=(10, 2))
-tk.Label(footer_frame, text="💎 Versión PRO disponible con lector de código", 
-         font=("Segoe UI", 8), bg="#AB47BC", fg="#FFEB3B").pack() # Amarillo brillante
-tk.Label(footer_frame, text="🎯 Sistema de usuarios mejorado", 
-         font=("Segoe UI", 8), bg="#AB47BC", fg="#FFEB3B").pack(pady=(0, 8)) # Amarillo brillante
+tk.Label(
+    footer_frame,
+    text="VmPOS · versión de demostración",
+    font=F_SMALL,
+    bg=T.FOOTER,
+    fg=T.HEADER_TEXT_DIM,
+).pack(pady=18)
 
 # 🎯 Eventos de teclado
 ventana.bind("<Return>", validar_usuario)

@@ -1,22 +1,26 @@
 import tkinter as tk
 from tkinter import ttk
-import subprocess
 import datetime
 from tkinter import messagebox
 import sqlite3
 import importlib.util
 import os
 import sys
+import webbrowser
 
-# Configuración de rutas para PyInstaller
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths import ventas_db_path
+from fiado_db import ensure_fiado_schema
+from layout_responsive import (
+    bind_reflow_grid_uniform,
+    bind_reflow_pack,
+    bind_reflow_pair_header_body,
+    centrar_ventana,
+    crear_cuerpo_modulo_scroll,
+    modulo_scroll_finalizar,
+)
+from ui_theme import T, F_BODY, F_BODY_B, F_SMALL, F_STAT, F_SUB, FONT
 
-base_dir = BASE_DIR
-database_dir = os.path.join(base_dir, 'database')
-ruta_db = os.path.join(database_dir, 'ventas.db')
+ruta_db = ventas_db_path()
 
 # Intentar importar el generador de códigos de barras
 GENERADOR_DISPONIBLE = False
@@ -40,55 +44,57 @@ except ImportError as e:
         print("Pantalla de carga no disponible")
 
 try:
+    from gastos_menu import iniciar_gastos
+except ImportError as e:
+    print(f"Warning: gastos_menu module not found: {e}")
+    def iniciar_gastos(parent=None):
+        messagebox.showwarning("Módulo no disponible", "El módulo de gastos no está disponible.")
+
+try:
     from reportes_menu import iniciar_reportes
 except ImportError as e:
     print(f"Warning: reportes_menu module not found: {e}")
-    def iniciar_reportes():
+    def iniciar_reportes(parent=None):
         messagebox.showwarning("Módulo no disponible", "El módulo de reportes no está disponible.")
 
 try:
     from clientes_menu import iniciar_clientes
 except ImportError as e:
     print(f"Warning: clientes_menu module not found: {e}")
-    def iniciar_clientes():
+    def iniciar_clientes(parent=None):
         messagebox.showwarning("Módulo no disponible", "El módulo de clientes no está disponible.")
+
+try:
+    from fiado_menu import iniciar_fiado
+except ImportError as e:
+    print(f"Warning: fiado_menu module not found: {e}")
+    def iniciar_fiado(parent=None):
+        messagebox.showwarning("Módulo no disponible", "El módulo de fiados no está disponible.")
 
 try:
     from configuracion_menu import iniciar_configuracion
 except ImportError as e:
     print(f"Warning: configuracion_menu module not found: {e}")
-    def iniciar_configuracion():
+    def iniciar_configuracion(parent=None):
         messagebox.showwarning("Módulo no disponible", "El módulo de configuración no está disponible.")
 
 try:
     from usuarios_menu import iniciar_usuarios
 except ImportError as e:
     print(f"Warning: usuarios_menu module not found: {e}")
-    def iniciar_usuarios():
+    def iniciar_usuarios(parent=None):
         messagebox.showwarning("Módulo no disponible", "El módulo de usuarios no está disponible.")
 
 try:
     from inventario_menu import iniciar_inventario
 except ImportError as e:
     print(f"Warning: inventario_menu module not found: {e}")
-    def iniciar_inventario():
+    def iniciar_inventario(parent=None):
         messagebox.showwarning("Módulo no disponible", "El módulo de inventario no está disponible.")
 
-# Ruta de la base de datos
-base_dir = os.path.dirname(os.path.abspath(__file__))
-database_dir = os.path.join(base_dir, '..', 'database')
-ruta_db = os.path.join(database_dir, 'ventas.db')
-
-# Verificar si existe la base de datos, si no crear el directorio
-if not os.path.exists(database_dir):
-    try:
-        os.makedirs(database_dir, exist_ok=True)
-        print(f"Directorio de base de datos creado: {database_dir}")
-    except Exception as e:
-        print(f"Error creando directorio de base de datos: {e}")
-
+database_dir = os.path.dirname(ruta_db)
 if not os.path.exists(ruta_db):
-    print(f"Advertencia: Base de datos no encontrada en {ruta_db}")
+    print(f"Advertencia: Base de datos no encontrada en {ruta_db} (se creará al usar el sistema)")
 
 # Diccionario de permisos predefinidos para cada rol
 PERMISOS = {
@@ -100,7 +106,8 @@ PERMISOS = {
         "Gastos": 1,
         "Usuarios": 1,
         "Configuración": 1,
-        "Códigos de Barras": 1
+        "Códigos de Barras": 1,
+        "Fiados": 1,
     },
     "admin": {  # Agregar alias para administrador
         "Ventas": 1,
@@ -110,7 +117,8 @@ PERMISOS = {
         "Gastos": 1,
         "Usuarios": 1,
         "Configuración": 1,
-        "Códigos de Barras": 1
+        "Códigos de Barras": 1,
+        "Fiados": 1,
     },
     "vendedor": {
         "Ventas": 1,
@@ -120,7 +128,8 @@ PERMISOS = {
         "Gastos": 0,
         "Usuarios": 0,
         "Configuración": 0,
-        "Códigos de Barras": 1
+        "Códigos de Barras": 1,
+        "Fiados": 1,
     },
     "gerente": {
         "Ventas": 1,
@@ -130,7 +139,8 @@ PERMISOS = {
         "Gastos": 0,
         "Usuarios": 1,
         "Configuración": 1,
-        "Códigos de Barras": 1
+        "Códigos de Barras": 1,
+        "Fiados": 1,
     }
 }
 
@@ -152,6 +162,20 @@ class VmPOSDashboard(tk.Tk):
         
         # Obtener permisos después de definir el rol
         self.permisos = self._get_user_permissions()
+        self.license_limited = bool(self.datos_usuario.get("license_limited"))
+        self.license_notice_title = self.datos_usuario.get(
+            "license_notice_title", "Tu licencia ha vencido"
+        )
+        self.license_notice_message = self.datos_usuario.get(
+            "license_notice_message",
+            "Tu licencia ha vencido. Si quieres renovarla, escríbenos por WhatsApp.",
+        )
+        self.license_notice_whatsapp = str(
+            self.datos_usuario.get("license_notice_whatsapp", "3207716590")
+        ).strip()
+        if self.license_limited:
+            # Modo restringido por licencia vencida: no abrir módulos.
+            self.permisos = {k: 0 for k in self.permisos.keys()}
         
         # Variables para estadísticas
         self.stats_widgets = {}
@@ -164,6 +188,7 @@ class VmPOSDashboard(tk.Tk):
         
         self._setup_main_window()
         self._create_header()
+        self._create_license_banner()
         self._create_main_content()
         self._create_footer()
         self._bind_shortcuts()
@@ -190,51 +215,111 @@ class VmPOSDashboard(tk.Tk):
         """Configura las propiedades de la ventana principal."""
         try:
             self.title(f"VmPOS - Dashboard • {self.usuario} ({self.rol_usuario_display})")
-            self.geometry("1200x700")
-            self.resizable(False, False)
-            self.configure(bg="#ff9ff3")
-            
-            # Centrar ventana
+            self.resizable(True, True)
+            self.minsize(640, 380)
+            self.configure(bg=T.BG_APP)
             self.update_idletasks()
             screen_width = self.winfo_screenwidth()
             screen_height = self.winfo_screenheight()
-            x = (screen_width // 2) - (1200 // 2)
-            y = (screen_height // 2) - (700 // 2)
-            self.geometry(f"1200x700+{x}+{y}")
+            w = min(1200, max(800, int(screen_width * 0.88)))
+            h = min(800, max(520, int(screen_height * 0.82)))
+            centrar_ventana(self, w, h)
         except Exception as e:
             print(f"Error configurando ventana principal: {e}")
 
     def _create_header(self):
         """Crea y empaqueta el encabezado de la aplicación."""
         try:
-            header_frame = tk.Frame(self, bg="#e84393", height=80)
+            header_frame = tk.Frame(self, bg=T.HEADER_BAR, height=80)
             header_frame.pack(fill="x")
             header_frame.pack_propagate(False)
 
-            # Lado izquierdo del encabezado
-            header_left = tk.Frame(header_frame, bg="#e84393")
+            header_left = tk.Frame(header_frame, bg=T.HEADER_BAR)
             header_left.pack(side="left", fill="y", padx=30)
-            tk.Label(header_left, text="🌸", font=("Segoe UI Emoji", 28), bg="#e84393", fg="white").pack(side="left", pady=15)
-            tk.Label(header_left, text="VmPOS", font=("Segoe UI", 24, "bold"), bg="#e84393", fg="white").pack(side="left", padx=(10, 0), pady=18)
-            tk.Label(header_left, text="Centro de Copiado & Papelería", font=("Segoe UI", 12), bg="#e84393", fg="#ffd3e8").pack(side="left", padx=(15, 0), pady=20)
+            tk.Label(
+                header_left,
+                text="VmPOS",
+                font=(FONT, 22, "bold"),
+                bg=T.HEADER_BAR,
+                fg=T.WHITE,
+            ).pack(side="left", pady=22)
+            tk.Label(
+                header_left,
+                text="  ·  Centro de copiado y papelería",
+                font=F_BODY,
+                bg=T.HEADER_BAR,
+                fg=T.HEADER_TEXT_DIM,
+            ).pack(side="left", pady=22, padx=(4, 0))
 
-            # Lado derecho del encabezado
-            header_right = tk.Frame(header_frame, bg="#e84393")
+            header_right = tk.Frame(header_frame, bg=T.HEADER_BAR)
             header_right.pack(side="right", fill="y", padx=30)
-            
-            tk.Label(header_right, text=f"👤 {self.usuario}", font=("Segoe UI", 14, "bold"), bg="#e84393", fg="white").pack(anchor="e", pady=(12, 2))
-            
-            # Fecha y hora en tiempo real
-            self.lbl_fecha_hora = tk.Label(header_right, text="", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8")
+
+            tk.Label(
+                header_right,
+                text=self.usuario,
+                font=(FONT, 12, "bold"),
+                bg=T.HEADER_BAR,
+                fg=T.WHITE,
+            ).pack(anchor="e", pady=(14, 2))
+
+            self.lbl_fecha_hora = tk.Label(
+                header_right, text="", font=F_SMALL, bg=T.HEADER_BAR, fg=T.HEADER_TEXT_DIM
+            )
             self.lbl_fecha_hora.pack(anchor="e")
-            
-            emoji_rol = "👑" if self.rol_usuario in ["admin", "administrador"] else "👩‍💼"
-            tk.Label(header_right, text=f"{emoji_rol} {self.rol_usuario_display}", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack(anchor="e", pady=(2, 12))
+
+            emoji_rol = "●" if self.rol_usuario in ["admin", "administrador"] else "○"
+            tk.Label(
+                header_right,
+                text=f"{emoji_rol}  {self.rol_usuario_display}",
+                font=F_SMALL,
+                bg=T.HEADER_BAR,
+                fg=T.HEADER_TEXT_DIM,
+            ).pack(anchor="e", pady=(2, 14))
             
             # Actualizar fecha y hora
             self._actualizar_fecha_hora()
         except Exception as e:
             print(f"Error creando header: {e}")
+
+    def _create_license_banner(self):
+        """Muestra aviso superior cuando la licencia está vencida/desactivada."""
+        if not self.license_limited:
+            return
+        try:
+            fr = tk.Frame(self, bg=T.WARN, height=44)
+            fr.pack(fill="x")
+            fr.pack_propagate(False)
+
+            txt = f"{self.license_notice_title}: {self.license_notice_message}"
+            tk.Label(
+                fr,
+                text=txt,
+                font=F_BODY_B,
+                bg=T.WARN,
+                fg=T.WHITE,
+                anchor="w",
+            ).pack(side="left", padx=12, pady=8, fill="x", expand=True)
+
+            wa_num = "".join(ch for ch in self.license_notice_whatsapp if ch.isdigit())
+            if not wa_num.startswith("57"):
+                wa_num = f"57{wa_num}"
+            wa_msg = "Hola, quiero renovar mi licencia de VmPOS."
+            wa_url = f"https://wa.me/{wa_num}?text={wa_msg.replace(' ', '%20')}"
+            tk.Button(
+                fr,
+                text="Renovar por WhatsApp",
+                font=F_SMALL,
+                bg=T.ACCENT,
+                fg=T.WHITE,
+                bd=0,
+                padx=12,
+                pady=6,
+                relief="flat",
+                cursor="hand2",
+                command=lambda: webbrowser.open(wa_url),
+            ).pack(side="right", padx=10, pady=6)
+        except Exception as e:
+            print(f"Error creando banner de licencia: {e}")
 
     def _actualizar_fecha_hora(self):
         """Actualiza la fecha y hora en tiempo real."""
@@ -243,7 +328,7 @@ class VmPOSDashboard(tk.Tk):
                 now = datetime.datetime.now()
                 fecha_actual = now.strftime("%d/%m/%Y")
                 hora_actual = now.strftime("%H:%M:%S")
-                self.lbl_fecha_hora.config(text=f"📅 {fecha_actual} • 🕐 {hora_actual}")
+                self.lbl_fecha_hora.config(text=f"{fecha_actual}  ·  {hora_actual}")
                 # Programar la siguiente actualización en 1 segundo
                 self.after(1000, self._actualizar_fecha_hora)
         except Exception as e:
@@ -259,16 +344,28 @@ class VmPOSDashboard(tk.Tk):
                 
             conn = sqlite3.connect(ruta_db)
             cursor = conn.cursor()
+            ensure_fiado_schema(conn)
             fecha_hoy = datetime.date.today().strftime('%Y-%m-%d')
             
-            # 1. Obtener total de ventas del día
+            # 1. Ventas del día al contado (fiado no suma hasta cobrar en el módulo Fiados)
             cursor.execute("""
-                SELECT SUM(total_venta) 
-                FROM ventas 
+                SELECT COALESCE(SUM(total_venta), 0)
+                FROM ventas
                 WHERE DATE(fecha_venta) = ?
+                  AND LOWER(COALESCE(tipo_pago, 'contado')) != 'fiado'
             """, (fecha_hoy,))
             resultado_ventas = cursor.fetchone()
-            total_ventas = resultado_ventas[0] if resultado_ventas and resultado_ventas[0] else 0
+            total_ventas = float(resultado_ventas[0] or 0)
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='abonos_fiado'"
+            )
+            if cursor.fetchone():
+                cursor.execute(
+                    "SELECT COALESCE(SUM(monto), 0) FROM abonos_fiado WHERE fecha = ?",
+                    (fecha_hoy,),
+                )
+                ra = cursor.fetchone()
+                total_ventas += float(ra[0] or 0)
             
             # 2. Obtener total de gastos del día
             cursor.execute("""
@@ -472,20 +569,23 @@ class VmPOSDashboard(tk.Tk):
     def _create_main_content(self):
         """Crea y empaqueta el área de contenido principal, incluyendo estadísticas y botones."""
         try:
-            main_content = tk.Frame(self, bg="#ffeaa7")
-            main_content.pack(fill="both", expand=True, padx=20, pady=20)
+            wrap = tk.Frame(self, bg=T.BG_APP)
+            wrap.pack(fill="both", expand=True, padx=20, pady=20)
+            main_content = crear_cuerpo_modulo_scroll(wrap, bg=T.BG_APP)
 
             self._create_stats_panel(main_content)
             self._create_buttons_panel(main_content)
             self._create_quick_access_panel(main_content)
-            
+
             # Mostrar información del modo vendedor si aplica
             if self.rol_usuario == "vendedor":
-                permisos_info = tk.Frame(main_content, bg="#FFF3E0", bd=1, relief="solid", height=40)
+                permisos_info = tk.Frame(main_content, bg=T.WARN_BG, highlightbackground=T.BORDER, highlightthickness=1, height=40)
                 permisos_info.pack(fill="x", pady=(10, 0))
                 permisos_info.pack_propagate(False)
-                tk.Label(permisos_info, text="🛍️ MODO VENDEDOR: Acceso limitado a Ventas, Inventario, Clientes y Reportes", 
-                         font=("Segoe UI", 10, "bold"), bg="#FFF3E0", fg="#E65100").pack(pady=10)
+                tk.Label(permisos_info, text="Perfil: vendedor — acceso limitado a módulos según permisos",
+                         font=F_SMALL, bg=T.WARN_BG, fg=T.WARN).pack(pady=10)
+
+            modulo_scroll_finalizar(main_content)
         except Exception as e:
             print(f"Error creando contenido principal: {e}")
 
@@ -494,113 +594,175 @@ class VmPOSDashboard(tk.Tk):
         Crea el panel de estadísticas en la parte superior del área de contenido principal.
         """
         try:
-            stats_frame = tk.Frame(parent, bg="#ffeaa7")
+            stats_frame = tk.Frame(parent, bg=T.BG_APP)
             stats_frame.pack(fill="x", pady=(0, 20))
 
             stats = [
-                ("💖", "Ganancias Hoy", "ganancias", "#fd79a8"),
-                ("🎀", "Productos", "productos", "#74b9ff"),
-                ("💎", "Clientes", "clientes", "#a29bfe"),
-                ("🌈", "Pedidos", "pedidos", "#55efc4")
+                ("💰 Ingresos netos hoy", "ganancias", T.STAT_1),
+                ("📦 Productos en inventario", "productos", T.STAT_2),
+                ("👥 Movimientos hoy (clientes)", "clientes", T.STAT_3),
+                ("🧾 Ventas hoy (pedidos)", "pedidos", T.STAT_4),
             ]
 
-            for i, (icono, titulo, key, color) in enumerate(stats):
-                stat_card = tk.Frame(stats_frame, bg="white", bd=2, relief="solid")
-                stat_card.pack(side="left", fill="both", expand=True, padx=(0 if i == 0 else 10, 0))
+            pads_w = ((0, 10), (10, 10), (10, 10), (10, 0))
+            lista_tarjetas = []
+            for i, (titulo, key, color) in enumerate(stats):
+                stat_card = tk.Frame(stats_frame, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+                lista_tarjetas.append(stat_card)
 
-                card_header = tk.Frame(stat_card, bg=color, height=5)
+                card_header = tk.Frame(stat_card, bg=color, height=4)
                 card_header.pack(fill="x")
-                card_content = tk.Frame(stat_card, bg="white")
+                card_content = tk.Frame(stat_card, bg=T.BG_CARD)
                 card_content.pack(fill="both", expand=True, padx=20, pady=15)
-                tk.Label(card_content, text=icono, font=("Segoe UI Emoji", 24), bg="white").pack()
-                tk.Label(card_content, text=titulo, font=("Segoe UI", 11), bg="white", fg="#636e72").pack()
-                
+                tk.Label(card_content, text=titulo, font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED).pack(anchor="w")
+
                 # Crear widget de valor y guardarlo en el diccionario
                 valor_inicial = "$0 COP" if key == "ganancias" else "0"
-                valor_widget = tk.Label(card_content, text=valor_inicial, font=("Segoe UI", 16, "bold"), bg="white", fg="#2d3436")
+                valor_widget = tk.Label(card_content, text=valor_inicial, font=F_STAT, bg=T.BG_CARD, fg=T.TEXT)
                 valor_widget.pack()
                 self.stats_widgets[key] = valor_widget
+
+            bind_reflow_pack(
+                stats_frame,
+                [
+                    (
+                        lista_tarjetas[i],
+                        {"side": tk.LEFT, "fill": tk.BOTH, "expand": True, "padx": pads_w[i]},
+                        {"fill": tk.X, "pady": (0, 10)},
+                    )
+                    for i in range(len(lista_tarjetas))
+                ],
+                umbral=880,
+                debounce_ms=80,
+            )
         except Exception as e:
             print(f"Error creando panel de estadísticas: {e}")
 
     def _create_buttons_panel(self, parent):
         """Crea el panel principal con botones de operación, gestión y configuración."""
         try:
-            buttons_container = tk.Frame(parent, bg="#ffeaa7")
+            buttons_container = tk.Frame(parent, bg=T.BG_APP)
             buttons_container.pack(fill="both", expand=True)
 
-            left_panel = tk.Frame(buttons_container, bg="white", bd=3, relief="solid")
-            left_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
-            tk.Label(left_panel, text="✨ OPERACIONES PRINCIPALES", font=("Segoe UI", 14, "bold"), bg="white", fg="#e84393").pack(pady=20)
-            self._crear_boton_moderno(left_panel, "Nueva Venta", "💖", "#fd79a8", lambda: self._accion("Ventas"), "Ventas")
-            self._crear_boton_moderno(left_panel, "Gestionar Inventario", "🎀", "#74b9ff", lambda: self._accion("Inventario"), "Inventario")
-            self._crear_boton_moderno(left_panel, "Clientes", "💎", "#55efc4", lambda: self._accion("Clientes"), "Clientes")
-            
-            center_panel = tk.Frame(buttons_container, bg="white", bd=3, relief="solid")
-            center_panel.pack(side="left", fill="both", expand=True, padx=5)
-            tk.Label(center_panel, text="💫 GESTIÓN", font=("Segoe UI", 14, "bold"), bg="white", fg="#e84393").pack(pady=20)
-            self._crear_boton_moderno(center_panel, "Reportes", "🌈", "#fdcb6e", lambda: self._accion("Reportes"), "Reportes")
-            self._crear_boton_moderno(center_panel, "Control de Gastos", "🌸", "#ff7675", lambda: self._accion("Gastos"), "Gastos")
-            # AGREGAR EL BOTÓN DEL GENERADOR DE CÓDIGOS DE BARRAS
-            self._crear_boton_moderno(center_panel, "Códigos de Barras", "🔢", "#e17055", lambda: self._accion("Códigos de Barras"), "Códigos de Barras")
+            left_panel = tk.Frame(buttons_container, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+            tk.Label(left_panel, text="🏪  Operaciones", font=F_SUB, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=20, pady=(20, 8))
+            self._crear_boton_moderno(left_panel, "Nueva venta", "🧾", T.STAT_1, lambda: self._accion("Ventas"), "Ventas")
+            self._crear_boton_moderno(left_panel, "Inventario", "📦", T.STAT_2, lambda: self._accion("Inventario"), "Inventario")
+            self._crear_boton_moderno(left_panel, "Clientes", "👥", T.STAT_3, lambda: self._accion("Clientes"), "Clientes")
 
-            right_panel = tk.Frame(buttons_container, bg="white", bd=3, relief="solid")
-            right_panel.pack(side="right", fill="both", expand=True, padx=(10, 0))
-            tk.Label(right_panel, text="🎨 CONFIGURACIÓN", font=("Segoe UI", 14, "bold"), bg="white", fg="#e84393").pack(pady=20)
-            self._crear_boton_moderno(right_panel, "Configuración", "✨", "#a29bfe", lambda: self._accion("Configuración"), "Configuración")
-            self._crear_boton_moderno(right_panel, "Usuarios", "👸", "#fd79a8", lambda: self._accion("Usuarios"), "Usuarios")
+            center_panel = tk.Frame(buttons_container, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+            tk.Label(center_panel, text="📊  Gestión", font=F_SUB, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=20, pady=(20, 8))
+            self._crear_boton_moderno(center_panel, "Reportes", "📈", T.STAT_4, lambda: self._accion("Reportes"), "Reportes")
+            self._crear_boton_moderno(center_panel, "Gastos", "💸", T.WARN, lambda: self._accion("Gastos"), "Gastos")
+            self._crear_boton_moderno(center_panel, "Códigos de barras", "🏷️", T.POS_MUTED, lambda: self._accion("Códigos de Barras"), "Códigos de Barras")
+            self._crear_boton_moderno(center_panel, "Fiados", "📒", T.ACCENT, lambda: self._accion("Fiados"), "Fiados")
+
+            right_panel = tk.Frame(buttons_container, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+            tk.Label(right_panel, text="🛡️  Administración", font=F_SUB, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=20, pady=(20, 8))
+            self._crear_boton_moderno(right_panel, "Configuración", "⚙️", T.STAT_2, lambda: self._accion("Configuración"), "Configuración")
+            self._crear_boton_moderno(right_panel, "Usuarios", "👤", T.STAT_1, lambda: self._accion("Usuarios"), "Usuarios")
+
+            bind_reflow_pack(
+                buttons_container,
+                [
+                    (
+                        left_panel,
+                        {"side": tk.LEFT, "fill": tk.BOTH, "expand": True, "padx": (0, 10)},
+                        {"fill": tk.X, "pady": (0, 10)},
+                    ),
+                    (
+                        center_panel,
+                        {"side": tk.LEFT, "fill": tk.BOTH, "expand": True, "padx": 10},
+                        {"fill": tk.X, "pady": (0, 10)},
+                    ),
+                    (
+                        right_panel,
+                        {"side": tk.LEFT, "fill": tk.BOTH, "expand": True, "padx": (10, 0)},
+                        {"fill": tk.X, "pady": (0, 10)},
+                    ),
+                ],
+                umbral=960,
+                debounce_ms=80,
+            )
         except Exception as e:
             print(f"Error creando panel de botones: {e}")
 
     def _create_quick_access_panel(self, parent):
         """Crea el panel de acceso rápido en la parte inferior del área de contenido principal."""
         try:
-            quick_access = tk.Frame(parent, bg="#e84393", height=80)
+            quick_access = tk.Frame(parent, bg=T.HEADER_BAR)
             quick_access.pack(fill="x", pady=(20, 0))
-            quick_access.pack_propagate(False)
 
-            tk.Label(quick_access, text="💫 ACCESO RÁPIDO", font=("Segoe UI", 12, "bold"), bg="#e84393", fg="white").pack(side="left", padx=20, pady=25)
-            quick_frame = tk.Frame(quick_access, bg="#e84393")
-            quick_frame.pack(side="right", padx=20, pady=15)
+            qa_label = tk.Label(
+                quick_access,
+                text="✨  Accesos rápidos",
+                font=F_BODY_B,
+                bg=T.HEADER_BAR,
+                fg=T.WHITE,
+            )
+            quick_frame = tk.Frame(quick_access, bg=T.HEADER_BAR)
 
             quick_buttons = [
-                ("🌟", "Nueva Factura", "#fd79a8", "Ventas", lambda: self._accion("Ventas")),
-                ("💎", "Consultar Stock", "#74b9ff", "Inventario", lambda: self._accion("Inventario")),
-                ("🔢", "Generar Código", "#e17055", "Códigos de Barras", lambda: self._accion("Códigos de Barras")),
-                ("🎀", "Backup", "#55efc4", "Configuración", lambda: self._accion("Configuración")),
-                ("✨", "Sincronizar", "#fdcb6e", "Configuración", lambda: self._actualizar_estadisticas())
+                ("🧾  Nueva factura", T.STAT_1, "Ventas", lambda: self._accion("Ventas")),
+                ("📦  Stock", T.STAT_2, "Inventario", lambda: self._accion("Inventario")),
+                ("🏷️  Códigos", T.STAT_4, "Códigos de Barras", lambda: self._accion("Códigos de Barras")),
+                ("💾  Respaldo", T.STAT_3, "Configuración", lambda: self._accion("Configuración")),
+                ("🔄  Actualizar", T.ACCENT, "Configuración", lambda: self._actualizar_estadisticas()),
             ]
-            
-            for icono, texto, color, modulo, comando in quick_buttons:
-                tiene_permiso = self.permisos.get(modulo, 0) == 1 if modulo != "Configuración" or texto != "Sincronizar" else True
-                color_final = color if tiene_permiso else "#BDBDBD"
+
+            quick_btn_widgets = []
+            for texto, color, modulo, comando in quick_buttons:
+                tiene_permiso = (
+                    self.permisos.get(modulo, 0) == 1 if modulo != "Configuración" or texto != "Actualizar" else True
+                )
+                color_final = color if tiene_permiso else T.DIVIDER
                 cursor_final = "hand2" if tiene_permiso else "no"
 
                 def _on_click(cmd, has_perm):
                     return lambda: cmd() if has_perm else self._mostrar_alerta_sin_permisos()
 
-                quick_btn = tk.Button(quick_frame, text=f"{icono}\n{texto}",
-                                     font=("Segoe UI", 9, "bold"), bg=color_final, fg="white",
-                                     bd=0, cursor=cursor_final, relief="flat", width=10, height=2,
-                                     command=_on_click(comando, tiene_permiso))
-                quick_btn.pack(side="left", padx=5)
+                quick_btn = tk.Button(
+                    quick_frame,
+                    text=texto,
+                    font=F_SMALL,
+                    bg=color_final,
+                    fg=T.WHITE,
+                    bd=0,
+                    cursor=cursor_final,
+                    relief="flat",
+                    padx=10,
+                    pady=6,
+                    command=_on_click(comando, tiene_permiso),
+                )
+                quick_btn_widgets.append(quick_btn)
+
+            bind_reflow_pair_header_body(quick_access, qa_label, quick_frame, umbral=760, debounce_ms=80)
+            # Siempre en filas (2-3 columnas) para evitar columna vertical de botones.
+            bind_reflow_grid_uniform(
+                quick_frame,
+                quick_btn_widgets,
+                columnas_cuando_anchas=3,
+                umbral=420,
+                debounce_ms=80,
+                pad_exterior=4,
+            )
         except Exception as e:
             print(f"Error creando panel de acceso rápido: {e}")
 
     def _create_footer(self):
         """Crea y empaqueta el pie de página de la aplicación."""
         try:
-            footer = tk.Frame(self, bg="#e84393", height=50)
+            footer = tk.Frame(self, bg=T.FOOTER, height=48)
             footer.pack(fill="x")
             footer.pack_propagate(False)
 
-            footer_left = tk.Frame(footer, bg="#e84393")
-            footer_left.pack(side="left", padx=20, pady=10)
-            tk.Label(footer_left, text="📍 Puerto Colombia • 📞 +573215545788", font=("Segoe UI", 10), bg="#e84393", fg="white").pack()
+            footer_left = tk.Frame(footer, bg=T.FOOTER)
+            footer_left.pack(side="left", padx=20, pady=12)
+            tk.Label(footer_left, text="Puerto Colombia  ·  +57 321 554 5788", font=F_SMALL, bg=T.FOOTER, fg=T.HEADER_TEXT_DIM).pack()
 
-            footer_right = tk.Frame(footer, bg="#e84393")
-            footer_right.pack(side="right", padx=20, pady=10)
-            tk.Label(footer_right, text="✨ VmPOS v3.1.0 • Sistema Activo 💖", font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack()
+            footer_right = tk.Frame(footer, bg=T.FOOTER)
+            footer_right.pack(side="right", padx=20, pady=12)
+            tk.Label(footer_right, text="VmPOS v3.1", font=F_SMALL, bg=T.FOOTER, fg=T.HEADER_TEXT_DIM).pack()
         except Exception as e:
             print(f"Error creando footer: {e}")
 
@@ -636,29 +798,36 @@ class VmPOSDashboard(tk.Tk):
         """Muestra una alerta personalizada cuando un usuario no tiene permisos."""
         try:
             alerta = tk.Toplevel(self)
-            alerta.title("🚫 Acceso Denegado")
-            alerta.geometry("400x250")
-            alerta.configure(bg="#FFCDD2")
+            alerta.title("Acceso denegado")
+            alerta.configure(bg=T.DANGER_BG)
             alerta.resizable(False, False)
             alerta.grab_set()
+            centrar_ventana(alerta, 400, 250)
 
-            # Centrar la ventana de alerta
-            alerta.update_idletasks()
-            x = (alerta.winfo_screenwidth() // 2) - (400 // 2)
-            y = (alerta.winfo_screenheight() // 2) - (250 // 2)
-            alerta.geometry(f"400x250+{x}+{y}")
-
-            main_frame = tk.Frame(alerta, bg="white", bd=2, relief="solid")
-            main_frame.pack(fill="both", expand=True, padx=15, pady=15)
-            header_frame = tk.Frame(main_frame, bg="#F44336", height=60)
+            main_frame = tk.Frame(alerta, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+            main_frame.pack(fill="both", expand=True, padx=16, pady=16)
+            header_frame = tk.Frame(main_frame, bg=T.DANGER, height=48)
             header_frame.pack(fill="x")
             header_frame.pack_propagate(False)
-            tk.Label(header_frame, text="🚫", font=("Segoe UI Emoji", 24), bg="#F44336", fg="white").pack(pady=15)
-            content_frame = tk.Frame(main_frame, bg="white")
+            tk.Label(header_frame, text="Acceso denegado", font=F_BODY_B, bg=T.DANGER, fg=T.WHITE).pack(pady=12)
+            content_frame = tk.Frame(main_frame, bg=T.BG_CARD)
             content_frame.pack(expand=True, fill="both", padx=20, pady=20)
-            tk.Label(content_frame, text="ACCESO DENEGADO", font=("Segoe UI", 14, "bold"), bg="white", fg="#F44336").pack(pady=(0, 10))
-            tk.Label(content_frame, text="No tienes permisos para acceder\na este módulo del sistema.", font=("Segoe UI", 11), bg="white", fg="#424242", justify="center").pack()
-            btn_ok = tk.Button(content_frame, text="🔒 Entendido", font=("Segoe UI", 10, "bold"), bg="#F44336", fg="white", bd=0, pady=8, cursor="hand2", command=alerta.destroy, relief="flat", width=15)
+            if self.license_limited:
+                texto_alerta = (
+                    "Tu licencia ha vencido.\n\n"
+                    "Los módulos están desactivados hasta renovar la licencia."
+                )
+            else:
+                texto_alerta = "No tiene permisos para este módulo."
+            tk.Label(
+                content_frame,
+                text=texto_alerta,
+                font=F_BODY,
+                bg=T.BG_CARD,
+                fg=T.TEXT,
+                justify="center",
+            ).pack()
+            btn_ok = tk.Button(content_frame, text="Cerrar", font=F_BODY_B, bg=T.DANGER, fg=T.WHITE, bd=0, pady=8, cursor="hand2", command=alerta.destroy, relief="flat", width=12)
             btn_ok.pack(pady=(15, 0))
             alerta.after(3000, alerta.destroy)
         except Exception as e:
@@ -670,108 +839,102 @@ class VmPOSDashboard(tk.Tk):
         """
         try:
             tiene_permiso = self.permisos.get(modulo, 0) == 1
-            btn_frame = tk.Frame(parent, bg="white")
-            btn_frame.pack(fill="x", padx=20, pady=8)
+            btn_frame = tk.Frame(parent, bg=T.BG_CARD)
+            btn_frame.pack(fill="x", padx=20, pady=6)
             
             if not tiene_permiso:
-                color_final = "#BDBDBD"
-                texto_final = f"🔒   {texto}"
+                color_final = T.DIVIDER
+                texto_final = f"{texto}  (sin permiso)"
                 cursor_final = "no"
             else:
                 color_final = color
-                texto_final = f"{icono}   {texto}"
+                texto_final = f"{icono}  {texto}"
                 cursor_final = "hand2"
 
-            btn = tk.Button(btn_frame, text=texto_final,
-                            font=("Segoe UI", 12, "bold"), bg=color_final, fg="white",
-                            bd=0, pady=15, cursor=cursor_final,
-                            command=lambda: comando() if tiene_permiso else self._mostrar_alerta_sin_permisos(),
-                            relief="flat", anchor="w", padx=20)
+            btn = tk.Button(
+                btn_frame,
+                text=texto_final,
+                font=F_BODY_B,
+                bg=color_final,
+                fg=T.WHITE,
+                bd=0,
+                pady=12,
+                cursor=cursor_final,
+                command=lambda: comando() if tiene_permiso else self._mostrar_alerta_sin_permisos(),
+                relief="flat",
+                anchor="w",
+                padx=16,
+                activebackground=color_final,
+                activeforeground=T.WHITE,
+            )
             btn.pack(fill="x")
 
-            # Efectos de hover solo para botones habilitados
             if tiene_permiso:
                 color_hover = {
-                    "#fd79a8": "#e84393",
-                    "#74b9ff": "#6c5ce7",
-                    "#55efc4": "#00b894",
-                    "#ff7675": "#e17055",
-                    "#a29bfe": "#6c5ce7",
-                    "#fdcb6e": "#f39c12",
-                    "#e17055": "#d63031"
-                }.get(color, "#e84393")
+                    T.STAT_1: "#0284c7",
+                    T.STAT_2: "#6d28d9",
+                    T.STAT_3: "#047857",
+                    T.STAT_4: "#d97706",
+                    T.ACCENT: T.ACCENT_HOVER,
+                    T.WARN: "#b45309",
+                    T.POS_MUTED: "#334155",
+                }.get(color, T.ACCENT_HOVER)
 
-                def on_enter(e):
-                    btn.config(bg=color_hover)
-                def on_leave(e):
-                    btn.config(bg=color_final)
+                def on_enter(e, ch=color_hover):
+                    btn.config(bg=ch)
+
+                def on_leave(e, cf=color_final):
+                    btn.config(bg=cf)
 
                 btn.bind("<Enter>", on_enter)
                 btn.bind("<Leave>", on_leave)
         except Exception as e:
             print(f"Error creando botón moderno: {e}")
 
+
     def _abrir_ventas(self):
-        """Abre el módulo de ventas."""
+        from navegacion_ventanas import abrir_modulo_con_menu_oculto, preparar_ventana_modulo
+        def abrir(db):
+            import ventas_menu
+            w = tk.Toplevel(db)
+            cuerpo = preparar_ventana_modulo(w, db)
+            ventas_menu.App(cuerpo, w)
         try:
-            ventas_path = os.path.join(os.path.dirname(__file__), "ventas_menu.py")
-            if os.path.exists(ventas_path):
-                subprocess.Popen(["python", ventas_path])
-            else:
-                messagebox.showwarning("⚠️ Archivo no encontrado", f"No se encontró el archivo ventas_menu.py en:\n{ventas_path}")
+            abrir_modulo_con_menu_oculto(self, abrir)
         except Exception as e:
-            messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de ventas:\n{e}")
+            messagebox.showerror("Error", f"No se pudo abrir el módulo de ventas:\n{e}")
 
     def _abrir_generador_codigo_barras(self):
-        """Abre el generador de códigos de barras."""
-        # Primero verificar dependencias
+        """Abre el generador de códigos de barras como ventana única con retorno al menú."""
         if not self._verificar_dependencias_generador():
-            messagebox.showerror("❌ Dependencias Faltantes", 
-                               "Faltan librerías necesarias para el generador.\n\n"
-                               "Instala PIL/Pillow ejecutando:\n"
-                               "pip install Pillow\n\n"
-                               "Luego reinicia la aplicación.")
+            messagebox.showerror(
+                "Dependencias faltantes",
+                "Faltan librerías para el generador.\n\nInstala Pillow:\npip install Pillow",
+            )
             return
-        
-        try:
-            # Usar la función importada directamente si está disponible
+        from navegacion_ventanas import abrir_modulo_con_menu_oculto
+
+        def abrir(db):
             if GENERADOR_DISPONIBLE and iniciar_generador_barras is not None:
-                print("🚀 Iniciando generador de códigos de barras...")
-                iniciar_generador_barras(self)
-                print("✅ Generador de códigos de barras iniciado correctamente")
+                iniciar_generador_barras(db)
             else:
-                # Intentar cargar dinámicamente si la importación falló
                 self._cargar_generador_dinamicamente()
-                
+
+        try:
+            abrir_modulo_con_menu_oculto(self, abrir)
         except Exception as e:
             error_msg = str(e)
-            print(f"❌ Error detallado: {error_msg}")
-            
-            # Mensajes de error específicos
             if "PIL" in error_msg or "Pillow" in error_msg:
-                messagebox.showerror("❌ Error PIL/Pillow", 
-                                   f"Error con la librería de imágenes PIL/Pillow.\n\n"
-                                   f"Instala o actualiza Pillow:\n"
-                                   f"pip install --upgrade Pillow\n\n"
-                                   f"Error técnico: {error_msg}")
+                messagebox.showerror(
+                    "Error PIL/Pillow",
+                    f"Error con Pillow.\n\npip install --upgrade Pillow\n\nDetalle: {error_msg}",
+                )
             elif "tkinter" in error_msg.lower():
-                messagebox.showerror("❌ Error Tkinter", 
-                                   f"Error con la interfaz gráfica.\n\n"
-                                   f"Error técnico: {error_msg}")
+                messagebox.showerror("Error de interfaz", f"Error técnico: {error_msg}")
             elif "No module named" in error_msg or "ModuleNotFoundError" in error_msg:
-                messagebox.showerror("❌ Módulo No Encontrado", 
-                                   f"No se encontró el módulo del generador de códigos.\n\n"
-                                   f"Verifica que el archivo 'generador_codigo_barras.py' "
-                                   f"esté en la misma carpeta.\n\n"
-                                   f"Error técnico: {error_msg}")
+                messagebox.showerror("Módulo no encontrado", f"Detalle: {error_msg}")
             else:
-                messagebox.showerror("❌ Error Inesperado", 
-                                   f"Ocurrió un error inesperado al abrir el generador.\n\n"
-                                   f"Error técnico: {error_msg}\n\n"
-                                   f"Intenta:\n"
-                                   f"1. Reiniciar la aplicación\n"
-                                   f"2. Verificar que todos los archivos estén presentes\n"
-                                   f"3. Ejecutar 'pip install Pillow' si no está instalado")
+                messagebox.showerror("Error", f"No se pudo abrir el generador:\n{error_msg}")
 
     def _cargar_generador_dinamicamente(self):
         """Carga el generador dinámicamente si la importación inicial falló."""
@@ -848,69 +1011,65 @@ class VmPOSDashboard(tk.Tk):
             print(f"❌ Error verificando dependencias: {e}")
             return False
 
-    def _abrir_control_gastos(self):
-        """Abre el módulo de control de gastos."""
+    def _abrir_con_retorno(self, abrir_modulo_fn):
+        """Abre un módulo (recibe el dashboard como padre), ocultando el menú hasta volver o cerrar."""
+        from navegacion_ventanas import abrir_modulo_con_menu_oculto
         try:
-            # Intentar abrir el módulo de gastos
-            gastos_path = os.path.join(os.path.dirname(__file__), "gastos_menu.py")
-            
-            # Verificar si el archivo existe
-            if os.path.exists(gastos_path):
-                subprocess.Popen(["python", gastos_path])
-                messagebox.showinfo("✅ Control de Gastos", "Abriendo módulo de control de gastos...")
-            else:
-                # Si no existe, mostrar una ventana temporal
-                self._mostrar_ventana_gastos_temporal()
+            abrir_modulo_con_menu_oculto(self, abrir_modulo_fn)
         except Exception as e:
-            messagebox.showerror("❌ Error", f"No se pudo abrir el módulo de gastos:\n{e}")
+            messagebox.showerror("Error", f"No se pudo abrir el módulo:\n{e}")
+
+    def _abrir_control_gastos(self):
+        """Abre el módulo de control de gastos (misma lógica de ventana única + volver al menú)."""
+        from navegacion_ventanas import abrir_modulo_con_menu_oculto
+        try:
+            abrir_modulo_con_menu_oculto(self, lambda db: iniciar_gastos(db))
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el módulo de gastos:\n{e}")
 
     def _mostrar_ventana_gastos_temporal(self):
         """Muestra una ventana temporal para el control de gastos."""
         try:
             ventana_gastos = tk.Toplevel(self)
-            ventana_gastos.title("🌸 Control de Gastos - Temporal")
-            ventana_gastos.geometry("600x400")
-            ventana_gastos.configure(bg="#FFF3E0")
+            ventana_gastos.title("Gastos (temporal)")
+            ventana_gastos.configure(bg=T.BG_APP)
             ventana_gastos.transient(self)
             ventana_gastos.grab_set()
+            centrar_ventana(ventana_gastos, 600, 400)
 
-            # Centrar ventana
-            ventana_gastos.update_idletasks()
-            x = (ventana_gastos.winfo_screenwidth() // 2) - (600 // 2)
-            y = (ventana_gastos.winfo_screenheight() // 2) - (400 // 2)
-            ventana_gastos.geometry(f"600x400+{x}+{y}")
-
-            # Header
-            header_frame = tk.Frame(ventana_gastos, bg="#FF5722", height=60)
+            header_frame = tk.Frame(ventana_gastos, bg=T.HEADER_BAR, height=56)
             header_frame.pack(fill="x")
             header_frame.pack_propagate(False)
-            
-            tk.Label(header_frame, text="🌸 CONTROL DE GASTOS", 
-                    font=("Segoe UI", 16, "bold"), bg="#FF5722", fg="white").pack(pady=18)
+            tk.Label(header_frame, text="Registro de gastos", font=F_SUB, bg=T.HEADER_BAR, fg=T.WHITE).pack(pady=16)
 
-            # Contenido principal
-            main_frame = tk.Frame(ventana_gastos, bg="#FFF3E0")
+            main_frame = tk.Frame(ventana_gastos, bg=T.BG_APP)
             main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-            # Formulario para agregar gasto
-            form_frame = tk.LabelFrame(main_frame, text="Agregar Nuevo Gasto", 
-                                      bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+            form_frame = tk.LabelFrame(
+                main_frame, text="Nuevo gasto", bg=T.BG_CARD, fg=T.TEXT, font=(FONT, 11, "bold")
+            )
             form_frame.pack(fill="x", pady=10)
 
-            tk.Label(form_frame, text="Concepto:", bg="#FFF3E0", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", padx=10, pady=5)
-            self.entry_concepto = tk.Entry(form_frame, font=("Segoe UI", 10), width=30)
+            tk.Label(form_frame, text="Concepto:", bg=T.BG_CARD, font=F_BODY, fg=T.TEXT_MUTED).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+            self.entry_concepto = tk.Entry(form_frame, font=F_BODY, width=30)
             self.entry_concepto.grid(row=0, column=1, padx=10, pady=5)
 
-            tk.Label(form_frame, text="Valor:", bg="#FFF3E0", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", padx=10, pady=5)
-            self.entry_valor = tk.Entry(form_frame, font=("Segoe UI", 10), width=30)
+            tk.Label(form_frame, text="Valor:", bg=T.BG_CARD, font=F_BODY, fg=T.TEXT_MUTED).grid(row=1, column=0, sticky="w", padx=10, pady=5)
+            self.entry_valor = tk.Entry(form_frame, font=F_BODY, width=30)
             self.entry_valor.grid(row=1, column=1, padx=10, pady=5)
 
-            tk.Button(form_frame, text="💾 Guardar Gasto", bg="#4CAF50", fg="white", 
-                     font=("Segoe UI", 10, "bold"), command=self._guardar_gasto_temporal).grid(row=2, column=0, columnspan=2, pady=15)
+            tk.Button(
+                form_frame,
+                text="Guardar",
+                bg=T.SUCCESS,
+                fg=T.WHITE,
+                font=F_BODY_B,
+                command=self._guardar_gasto_temporal,
+            ).grid(row=2, column=0, columnspan=2, pady=15)
 
-            # Lista de gastos del día
-            lista_frame = tk.LabelFrame(main_frame, text="Gastos de Hoy", 
-                                       bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+            lista_frame = tk.LabelFrame(
+                main_frame, text="Gastos de hoy", bg=T.BG_CARD, fg=T.TEXT, font=(FONT, 11, "bold")
+            )
             lista_frame.pack(fill="both", expand=True, pady=10)
 
             # Treeview para mostrar gastos
@@ -929,8 +1088,13 @@ class VmPOSDashboard(tk.Tk):
             self._cargar_gastos_hoy()
 
             # Total del día
-            self.label_total = tk.Label(lista_frame, text="Total gastos hoy: $0 COP", 
-                                       bg="#FFF3E0", fg="#E65100", font=("Segoe UI", 12, "bold"))
+            self.label_total = tk.Label(
+                lista_frame,
+                text="Total gastos hoy: $0 COP",
+                bg=T.BG_CARD,
+                fg=T.TEXT,
+                font=F_BODY_B,
+            )
             self.label_total.pack(pady=10)
         except Exception as e:
             print(f"Error mostrando ventana de gastos temporal: {e}")
@@ -1059,16 +1223,17 @@ class VmPOSDashboard(tk.Tk):
             return
 
         try:
-            # Diccionario para el manejo de acciones - CORREGIDO
+            # Diccionario para el manejo de acciones 
             actions = {
                 "Ventas": self._abrir_ventas,
-                "Inventario": lambda: iniciar_inventario() if 'iniciar_inventario' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de inventario no está disponible."),
-                "Clientes": lambda: iniciar_clientes() if 'iniciar_clientes' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de clientes no está disponible."),
-                "Reportes": lambda: iniciar_reportes() if 'iniciar_reportes' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de reportes no está disponible."),
-                "Configuración": lambda: iniciar_configuracion() if 'iniciar_configuracion' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de configuración no está disponible."),
-                "Usuarios": lambda: iniciar_usuarios() if 'iniciar_usuarios' in globals() else messagebox.showwarning("⚠️ Módulo no disponible", "El módulo de usuarios no está disponible."),
+                "Inventario": lambda: self._abrir_con_retorno(lambda p: iniciar_inventario(p)) if 'iniciar_inventario' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de inventario no está disponible."),
+                "Clientes": lambda: self._abrir_con_retorno(lambda p: iniciar_clientes(p)) if 'iniciar_clientes' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de clientes no está disponible."),
+                "Fiados": lambda: self._abrir_con_retorno(lambda p: iniciar_fiado(p)) if 'iniciar_fiado' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de fiados no está disponible."),
+                "Reportes": lambda: self._abrir_con_retorno(lambda p: iniciar_reportes(p)) if 'iniciar_reportes' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de reportes no está disponible."),
+                "Configuración": lambda: self._abrir_con_retorno(lambda p: iniciar_configuracion(p)) if 'iniciar_configuracion' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de configuración no está disponible."),
+                "Usuarios": lambda: self._abrir_con_retorno(lambda p: iniciar_usuarios(p)) if 'iniciar_usuarios' in globals() else messagebox.showwarning("Módulo no disponible", "El módulo de usuarios no está disponible."),
                 "Gastos": self._abrir_control_gastos,
-                "Códigos de Barras": self._abrir_generador_codigo_barras  # ACCIÓN CORREGIDA
+                "Códigos de Barras": self._abrir_generador_codigo_barras
             }
             
             action = actions.get(nombre)

@@ -3,9 +3,10 @@ from tkinter import ttk, messagebox, filedialog
 import os
 import sys
 import datetime  # Agregar esta importación
-from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
+
+from ui_theme import T, F_TITLE, F_HEAD, F_BODY, F_BODY_B, F_SMALL
 
 
 # Importación condicional de PIL con manejo de errores
@@ -15,6 +16,15 @@ try:
 except ImportError as e:
     print(f"Warning: PIL/Pillow no disponible: {e}")
     PIL_DISPONIBLE = False
+
+# Generación estándar de códigos de barras (legibles por lectores físicos)
+try:
+    import barcode
+    from barcode.writer import ImageWriter
+    BARCODE_LIB_DISPONIBLE = True
+except ImportError as e:
+    print(f"Warning: python-barcode no disponible: {e}")
+    BARCODE_LIB_DISPONIBLE = False
 
 class GeneradorCodigoBarras:
     """
@@ -35,21 +45,20 @@ class GeneradorCodigoBarras:
         
     def setup_window(self):
         """Configura la ventana principal del generador"""
-        self.ventana.title("🔢 Generador de Códigos de Barras - VmPOS")
-        self.ventana.geometry("900x700")
-        self.ventana.configure(bg="#ffeaa7")
-        self.ventana.resizable(True, False)
+        if self.ventana.master is not None:
+            from navegacion_ventanas import instalar_barra_volver
+            instalar_barra_volver(self.ventana, self.ventana.master)
+        from layout_responsive import centrar_ventana, crear_cuerpo_modulo_scroll, modulo_scroll_finalizar
+
+        self.ventana.title("Generador de códigos de barras · VmPOS")
+        self.ventana.configure(bg=T.BG_APP)
+        self.ventana.resizable(True, True)
+        self.cuerpo = crear_cuerpo_modulo_scroll(self.ventana, bg=T.BG_APP)
+        centrar_ventana(self.ventana, 900, 700, self.ventana.master if self.ventana.master else None)
         
-        # Centrar ventana
-        self.ventana.update_idletasks()
-        x = (self.ventana.winfo_screenwidth() // 2) - (900 // 2)
-        y = (self.ventana.winfo_screenheight() // 2) - (700 // 2)
-        self.ventana.geometry(f"900x700+{x}+{y}")
-        
-        # Hacer la ventana modal si tiene padre
+        # Ventana hija del menú (sin grab global para permitir «Volver» limpio)
         if self.ventana.master:
             self.ventana.transient(self.ventana.master)
-            self.ventana.grab_set()
     
     def create_widgets(self):
         """Crea todos los widgets de la interfaz"""
@@ -58,48 +67,56 @@ class GeneradorCodigoBarras:
         self.create_preview_section()
         self.create_buttons_section()
         self.create_footer()
+        modulo_scroll_finalizar(self.cuerpo)
     
     def create_header(self):
         """Crea el encabezado de la aplicación"""
-        header_frame = tk.Frame(self.ventana, bg="#e84393", height=80)
+        header_frame = tk.Frame(self.cuerpo, bg=T.POS_HEADER, height=76)
         header_frame.pack(fill="x")
         header_frame.pack_propagate(False)
-        
-        # Logo y título
-        title_frame = tk.Frame(header_frame, bg="#e84393")
-        title_frame.pack(expand=True)
-        
-        tk.Label(title_frame, text="🔢", font=("Segoe UI Emoji", 32), 
-                bg="#e84393", fg="white").pack(side="left", padx=(0, 10), pady=15)
-        
-        tk.Label(title_frame, text="Generador de Códigos de Barras", 
-                font=("Segoe UI", 20, "bold"), bg="#e84393", fg="white").pack(side="left", pady=20)
+
+        title_frame = tk.Frame(header_frame, bg=T.POS_HEADER)
+        title_frame.pack(side=tk.LEFT, fill=tk.Y, padx=20, pady=(12, 14))
+
+        tk.Label(title_frame, text="Códigos de barras", font=F_TITLE, bg=T.POS_HEADER, fg=T.WHITE).pack(anchor="w")
+        tk.Label(
+            title_frame,
+            text="Elija formato, ingrese datos y genere imagen PNG para productos o etiquetas.",
+            font=F_SMALL,
+            bg=T.POS_HEADER,
+            fg=T.HEADER_TEXT_DIM,
+            wraplength=680,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 0))
     
     def create_input_section(self):
         """Crea la sección de entrada de datos"""
-        input_frame = tk.LabelFrame(self.ventana, text="📝 Configuración del Código", 
-                                   bg="#ffeaa7", fg="#2d3436", font=("Segoe UI", 12, "bold"),
-                                   bd=2, relief="solid")
-        input_frame.pack(fill="x", padx=20, pady=(20, 10))
+        wrap = tk.Frame(self.cuerpo, bg=T.BG_APP)
+        wrap.pack(fill="x", padx=16, pady=(16, 8))
+        input_frame = tk.Frame(wrap, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+        input_frame.pack(fill="x")
+        tk.Frame(input_frame, bg=T.STAT_2, height=3).pack(fill="x")
+        tk.Label(input_frame, text="Configuración", font=F_HEAD, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=14, pady=(10, 6))
+
+        grid_frame = tk.Frame(input_frame, bg=T.BG_CARD)
+        grid_frame.pack(fill="x", padx=14, pady=(0, 12))
+
+        tk.Label(grid_frame, text="Número o texto", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
+
+        self.entry_codigo = tk.Entry(
+            grid_frame, font=F_BODY, width=30, relief="flat", bd=0,
+            highlightthickness=1, highlightbackground=T.INPUT_BORDER,
+        )
+        self.entry_codigo.grid(row=0, column=1, padx=(10, 0), pady=5, sticky="ew", ipady=4)
+        self.entry_codigo.bind("<KeyRelease>", self.on_text_change)
+
+        tk.Label(grid_frame, text="Formato", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(
+            row=1, column=0, sticky="w", pady=5
+        )
         
-        # Frame para organizar en grid
-        grid_frame = tk.Frame(input_frame, bg="#ffeaa7")
-        grid_frame.pack(fill="x", padx=20, pady=15)
-        
-        # Entrada de texto/número
-        tk.Label(grid_frame, text="Número o Texto:", font=("Segoe UI", 11, "bold"), 
-                bg="#ffeaa7", fg="#2d3436").grid(row=0, column=0, sticky="w", pady=5)
-        
-        self.entry_codigo = tk.Entry(grid_frame, font=("Segoe UI", 12), width=30, 
-                                    bd=2, relief="solid")
-        self.entry_codigo.grid(row=0, column=1, padx=(10, 0), pady=5, sticky="ew")
-        self.entry_codigo.bind('<KeyRelease>', self.on_text_change)
-        
-        # Selector de formato
-        tk.Label(grid_frame, text="Formato:", font=("Segoe UI", 11, "bold"), 
-                bg="#ffeaa7", fg="#2d3436").grid(row=1, column=0, sticky="w", pady=5)
-        
-        self.combo_formato = ttk.Combobox(grid_frame, font=("Segoe UI", 11), width=28, state="readonly")
+        self.combo_formato = ttk.Combobox(grid_frame, font=F_BODY, width=28, state="readonly")
         self.combo_formato.grid(row=1, column=1, padx=(10, 0), pady=5, sticky="ew")
         
         # Opciones de formato
@@ -119,94 +136,165 @@ class GeneradorCodigoBarras:
         # Configurar grid
         grid_frame.columnconfigure(1, weight=1)
         
-        # Frame para opciones adicionales
-        opciones_frame = tk.Frame(input_frame, bg="#ffeaa7")
-        opciones_frame.pack(fill="x", padx=20, pady=10)
-        
-        # Checkboxes para opciones
+        opciones_frame = tk.Frame(input_frame, bg=T.BG_CARD)
+        opciones_frame.pack(fill="x", padx=14, pady=(0, 12))
+
         self.mostrar_texto = tk.BooleanVar(value=True)
-        tk.Checkbutton(opciones_frame, text="Mostrar texto debajo del código", 
-                      variable=self.mostrar_texto, bg="#ffeaa7", font=("Segoe UI", 10)).pack(anchor="w")
-        
+        tk.Checkbutton(
+            opciones_frame,
+            text="Mostrar texto legible debajo del código",
+            variable=self.mostrar_texto,
+            bg=T.BG_CARD,
+            fg=T.TEXT,
+            font=F_BODY,
+            activebackground=T.BG_CARD,
+            activeforeground=T.TEXT,
+            selectcolor=T.BG_CARD,
+        ).pack(anchor="w")
+
         self.incluir_checksum = tk.BooleanVar(value=True)
-        tk.Checkbutton(opciones_frame, text="Incluir dígito de control (checksum)", 
-                      variable=self.incluir_checksum, bg="#ffeaa7", font=("Segoe UI", 10)).pack(anchor="w")
+        tk.Checkbutton(
+            opciones_frame,
+            text="Incluir dígito de control (checksum) cuando aplique",
+            variable=self.incluir_checksum,
+            bg=T.BG_CARD,
+            fg=T.TEXT,
+            font=F_BODY,
+            activebackground=T.BG_CARD,
+            activeforeground=T.TEXT,
+            selectcolor=T.BG_CARD,
+        ).pack(anchor="w")
     
     def create_preview_section(self):
         """Crea la sección de vista previa"""
-        preview_frame = tk.LabelFrame(self.ventana, text="👁️ Vista Previa", 
-                                     bg="#ffeaa7", fg="#2d3436", font=("Segoe UI", 12, "bold"),
-                                     bd=2, relief="solid")
-        preview_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        # Canvas para mostrar el código de barras
-        canvas_frame = tk.Frame(preview_frame, bg="white", bd=2, relief="solid")
-        canvas_frame.pack(fill="both", expand=True, padx=20, pady=15)
-        
-        self.canvas = tk.Canvas(canvas_frame, bg="white", height=200)
-        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Mensaje inicial
-        self.canvas.create_text(self.canvas.winfo_reqwidth()//2, 100, 
-                               text="Ingresa un código para generar la vista previa", 
-                               font=("Segoe UI", 12), fill="#636e72", tags="mensaje")
-        
-        # Información del código
-        info_frame = tk.Frame(preview_frame, bg="#ffeaa7")
-        info_frame.pack(fill="x", padx=20, pady=(0, 15))
-        
-        self.lbl_info = tk.Label(info_frame, text="", font=("Segoe UI", 10), 
-                                bg="#ffeaa7", fg="#636e72")
-        self.lbl_info.pack()
+        pwrap = tk.Frame(self.cuerpo, bg=T.BG_APP)
+        pwrap.pack(fill="both", expand=True, padx=16, pady=8)
+        preview_frame = tk.Frame(pwrap, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+        preview_frame.pack(fill="both", expand=True)
+        tk.Frame(preview_frame, bg=T.STAT_1, height=3).pack(fill="x")
+        tk.Label(preview_frame, text="Vista previa", font=F_HEAD, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=14, pady=(10, 6))
+
+        canvas_frame = tk.Frame(preview_frame, bg=T.INPUT_BG_ALT, highlightbackground=T.BORDER, highlightthickness=1)
+        canvas_frame.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+
+        self.canvas = tk.Canvas(canvas_frame, bg=T.WHITE, height=200, highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.canvas.create_text(
+            self.canvas.winfo_reqwidth() // 2,
+            100,
+            text="Ingrese un valor y pulse Generar para ver el código",
+            font=F_BODY,
+            fill=T.TEXT_MUTED,
+            tags="mensaje",
+        )
+
+        info_frame = tk.Frame(preview_frame, bg=T.BG_CARD)
+        info_frame.pack(fill="x", padx=14, pady=(0, 12))
+
+        self.lbl_info = tk.Label(info_frame, text="", font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED)
+        self.lbl_info.pack(anchor="w")
     
     def create_buttons_section(self):
         """Crea la sección de botones"""
-        buttons_frame = tk.Frame(self.ventana, bg="#ffeaa7")
-        buttons_frame.pack(fill="x", padx=20, pady=10)
-        
-        # Botón generar
-        self.btn_generar = tk.Button(buttons_frame, text="✨ Generar Código", 
-                                    font=("Segoe UI", 12, "bold"), bg="#00b894", fg="white",
-                                    bd=0, pady=12, cursor="hand2", relief="flat",
-                                    command=self.generar_codigo)
-        self.btn_generar.pack(side="left", padx=(0, 10), ipadx=20)
-        
-        # Botón guardar
-        self.btn_guardar = tk.Button(buttons_frame, text="💾 Guardar PNG", 
-                                    font=("Segoe UI", 12, "bold"), bg="#0984e3", fg="white",
-                                    bd=0, pady=12, cursor="hand2", relief="flat",
-                                    command=self.guardar_codigo, state="disabled")
-        self.btn_guardar.pack(side="left", padx=5, ipadx=20)
-        
-        # Botón imprimir
-        self.btn_imprimir = tk.Button(buttons_frame, text="🖨️ Imprimir", 
-                                     font=("Segoe UI", 12, "bold"), bg="#fdcb6e", fg="white",
-                                     bd=0, pady=12, cursor="hand2", relief="flat",
-                                     command=self.imprimir_codigo, state="disabled")
-        self.btn_imprimir.pack(side="left", padx=5, ipadx=20)
-        
-        # Botón limpiar
-        self.btn_limpiar = tk.Button(buttons_frame, text="🗑️ Limpiar", 
-                                    font=("Segoe UI", 12, "bold"), bg="#636e72", fg="white",
-                                    bd=0, pady=12, cursor="hand2", relief="flat",
-                                    command=self.limpiar_todo)
-        self.btn_limpiar.pack(side="left", padx=5, ipadx=20)
-        
-        # Botón cerrar
-        self.btn_cerrar = tk.Button(buttons_frame, text="❌ Cerrar", 
-                                   font=("Segoe UI", 12, "bold"), bg="#e17055", fg="white",
-                                   bd=0, pady=12, cursor="hand2", relief="flat",
-                                   command=self.cerrar_ventana)
-        self.btn_cerrar.pack(side="right", ipadx=20)
+        buttons_frame = tk.Frame(self.cuerpo, bg=T.BG_APP)
+        buttons_frame.pack(fill="x", padx=16, pady=(0, 12))
+
+        self.btn_generar = tk.Button(
+            buttons_frame,
+            text="Generar",
+            font=F_BODY_B,
+            bg=T.STAT_3,
+            fg=T.WHITE,
+            bd=0,
+            pady=10,
+            cursor="hand2",
+            relief="flat",
+            command=self.generar_codigo,
+            activebackground=T.POS_BTN_GO_HOVER,
+            activeforeground=T.WHITE,
+        )
+        self.btn_generar.pack(side="left", padx=(0, 8), ipadx=16)
+
+        self.btn_guardar = tk.Button(
+            buttons_frame,
+            text="Guardar PNG",
+            font=F_BODY_B,
+            bg=T.STAT_1,
+            fg=T.WHITE,
+            bd=0,
+            pady=10,
+            cursor="hand2",
+            relief="flat",
+            command=self.guardar_codigo,
+            state="disabled",
+            activebackground="#0284c7",
+            activeforeground=T.WHITE,
+        )
+        self.btn_guardar.pack(side="left", padx=6, ipadx=12)
+
+        self.btn_imprimir = tk.Button(
+            buttons_frame,
+            text="Imprimir",
+            font=F_BODY_B,
+            bg=T.STAT_4,
+            fg=T.WHITE,
+            bd=0,
+            pady=10,
+            cursor="hand2",
+            relief="flat",
+            command=self.imprimir_codigo,
+            state="disabled",
+            activebackground="#d97706",
+            activeforeground=T.WHITE,
+        )
+        self.btn_imprimir.pack(side="left", padx=6, ipadx=12)
+
+        self.btn_limpiar = tk.Button(
+            buttons_frame,
+            text="Limpiar",
+            font=F_BODY_B,
+            bg=T.POS_BTN_ALT,
+            fg=T.WHITE,
+            bd=0,
+            pady=10,
+            cursor="hand2",
+            relief="flat",
+            command=self.limpiar_todo,
+            activebackground=T.TEXT_MUTED,
+            activeforeground=T.WHITE,
+        )
+        self.btn_limpiar.pack(side="left", padx=6, ipadx=12)
+
+        self.btn_cerrar = tk.Button(
+            buttons_frame,
+            text="Cerrar",
+            font=F_BODY_B,
+            bg=T.DANGER,
+            fg=T.WHITE,
+            bd=0,
+            pady=10,
+            cursor="hand2",
+            relief="flat",
+            command=self.cerrar_ventana,
+            activebackground="#b91c1c",
+            activeforeground=T.WHITE,
+        )
+        self.btn_cerrar.pack(side="right", ipadx=16)
     
     def create_footer(self):
         """Crea el pie de página"""
-        footer_frame = tk.Frame(self.ventana, bg="#e84393", height=40)
+        footer_frame = tk.Frame(self.cuerpo, bg=T.FOOTER, height=40)
         footer_frame.pack(fill="x")
         footer_frame.pack_propagate(False)
-        
-        tk.Label(footer_frame, text="💫 VmPOS - Generador de Códigos de Barras v1.0", 
-                font=("Segoe UI", 10, "bold"), bg="#e84393", fg="white").pack(pady=10)
+
+        tk.Label(
+            footer_frame,
+            text="VmPOS · Generador de códigos de barras",
+            font=F_SMALL,
+            bg=T.FOOTER,
+            fg=T.HEADER_TEXT_DIM,
+        ).pack(pady=12)
     
     def on_text_change(self, event=None):
         """Maneja el cambio en el texto de entrada"""
@@ -277,110 +365,41 @@ class GeneradorCodigoBarras:
         draw.ellipse([x-center_size, y-center_size, x+center_size, y+center_size], fill='#fdcb6e')
     
     def generar_codigo_simple(self, texto, formato):
-        """Genera un código de barras simple en formato etiqueta pequeña con alta resolución"""
+        """Genera código real estándar usando python-barcode + Pillow."""
         if not PIL_DISPONIBLE:
             messagebox.showerror("❌ Error", "PIL/Pillow no está disponible.\nInstale con: pip install Pillow")
             return None
-            
-        # Dimensiones para etiqueta pequeña con buena resolución
-        width = 600  # Ancho con buena resolución
-        height = 240  # Alto total con buena resolución
-        barcode_height = 100  # Alto del código de barras
-        
-        # Crear imagen con fondo blanco y alta resolución
-        img = Image.new('RGB', (width, height), 'white')
-        draw = ImageDraw.Draw(img)
-        
-        # Dibujar borde de la etiqueta
-        draw.rectangle([4, 4, width-5, height-5], outline='#ddd', width=2)
-        
-        # === HEADER: "Variedades Marce" con florecitas ===
-        try:
-            # Cargar fuente más grande para mejor resolución
-            font_titulo = ImageFont.truetype("arial.ttf", 24)
-        except:
-            try:
-                font_titulo = ImageFont.truetype("Arial.ttf", 24)
-            except:
-                font_titulo = ImageFont.load_default()
-        
-        # Texto "Variedades Marce" centrado
-        titulo = "Variedades Marce"
-        try:
-            text_bbox = draw.textbbox((0, 0), titulo, font=font_titulo)
-            text_width = text_bbox[2] - text_bbox[0]
-        except:
-            text_width = len(titulo) * 14  # Estimación si textbbox no funciona
-        
-        text_x = (width - text_width) // 2
-        text_y = 15
-        
-        # Dibujar el título centrado
-        draw.text((text_x, text_y), titulo, fill='#2d3436', font=font_titulo)
-        
-        # Dibujar florecitas a los lados del título (mejor centradas)
-        flor_y = text_y + 12  # Centrar verticalmente con el texto
-        
-        # Florecita izquierda
-        flor_izq_x = text_x - 35
-        self.dibujar_florecita(draw, flor_izq_x, flor_y, tamaño=12, color='#ff7675')
-        
-        # Florecita derecha
-        flor_der_x = text_x + text_width + 25
-        self.dibujar_florecita(draw, flor_der_x, flor_y, tamaño=12, color='#ff7675')
-        
-        # === CÓDIGO DE BARRAS CENTRADO ===
-        barcode_start_y = 55
-        bar_width = 3  # Barras más anchas para mejor resolución
-        
-        # Calcular el ancho total del código de barras
-        total_bars = 0
-        for char in texto:
-            char_code = ord(char) % 10
-            total_bars += char_code + 1
-        
-        barcode_width = total_bars * (bar_width + 1)
-        start_x = (width - barcode_width) // 2  # Centrar el código de barras
-        
-        x = start_x
-        # Generar patrón de barras centrado
-        for i, char in enumerate(texto):
-            char_code = ord(char) % 10
-            for j in range(char_code + 1):
-                if (i + j) % 2 == 0:
-                    draw.rectangle([x, barcode_start_y, x + bar_width, 
-                                  barcode_start_y + barcode_height], fill='black')
-                x += bar_width + 1
-                
-                # Evitar que el código se salga del área
-                if x > width - 30:
-                    break
-            if x > width - 30:
-                break
-        
-        # === TEXTO DEBAJO DEL CÓDIGO CENTRADO ===
-        if self.mostrar_texto.get():
-            try:
-                font_codigo = ImageFont.truetype("arial.ttf", 18)
-            except:
-                try:
-                    font_codigo = ImageFont.truetype("Arial.ttf", 18)
-                except:
-                    font_codigo = ImageFont.load_default()
-            
-            # Centrar el texto del código
-            try:
-                codigo_bbox = draw.textbbox((0, 0), texto, font=font_codigo)
-                codigo_width = codigo_bbox[2] - codigo_bbox[0]
-            except:
-                codigo_width = len(texto) * 10  # Estimación
-            
-            codigo_x = (width - codigo_width) // 2
-            codigo_y = barcode_start_y + barcode_height + 15
-            
-            draw.text((codigo_x, codigo_y), texto, fill='#2d3436', font=font_codigo)
-        
-        return img
+        if not BARCODE_LIB_DISPONIBLE:
+            messagebox.showerror("❌ Error", "python-barcode no está disponible.\nInstale con: pip install python-barcode")
+            return None
+
+        fmt = (formato or "CODE128").upper().strip()
+        mapa = {
+            "CODE128": "code128",
+            "CODE39": "code39",
+            "EAN13": "ean13",
+            "EAN8": "ean8",
+            "UPC-A": "upc",
+            "ITF": "itf",
+        }
+        nombre_bc = mapa.get(fmt, "code128")
+        writer_options = {
+            "module_width": 0.28,   # barras suficientemente anchas para lectores comunes
+            "module_height": 22.0,
+            "quiet_zone": 6.5,
+            "font_size": 12,
+            "text_distance": 3,
+            "write_text": bool(self.mostrar_texto.get()),
+            "dpi": 300,
+            "background": "white",
+            "foreground": "black",
+        }
+        cls = barcode.get_barcode_class(nombre_bc)
+        kwargs = {}
+        if nombre_bc == "code39":
+            kwargs["add_checksum"] = bool(self.incluir_checksum.get())
+        bc = cls(texto, writer=ImageWriter(), **kwargs)
+        return bc.render(writer_options=writer_options)
     
     def generar_codigo(self):
         """Genera el código de barras"""
@@ -526,8 +545,16 @@ class GeneradorCodigoBarras:
         self.codigo_generado = None
     
     def cerrar_ventana(self):
-        """Cierra la ventana del generador"""
+        """Cierra el generador y vuelve a mostrar el menú si estaba oculto."""
+        master = self.ventana.master
         self.ventana.destroy()
+        if master is not None:
+            try:
+                master.wm_deiconify()
+                master.lift()
+                master.focus_force()
+            except tk.TclError:
+                pass
 
 def iniciar_generador_barras(parent=None):
     """Función para iniciar el generador de códigos de barras"""

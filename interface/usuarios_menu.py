@@ -19,6 +19,9 @@ from usuarios_db import (
     migrar_usuarios_existentes
 )
 
+from layout_responsive import crear_cuerpo_modulo_scroll, modulo_scroll_finalizar
+from ui_theme import T, F_TITLE, F_HEAD, F_BODY, F_BODY_B, F_SMALL, F_STAT, style_ttk_treeview_pos
+
 # 🌐 Variables globales para los widgets de la interfaz
 entradas = {}
 tabla = None
@@ -326,67 +329,67 @@ def refrescar_tabla():
     actualizar_tabla()
     messagebox.showinfo("Información", "Tabla actualizada correctamente.")
 
-def iniciar_usuarios():
+def iniciar_usuarios(parent=None):
     """
     Función principal que inicializa la ventana de gestión de usuarios.
     """
     global tabla, entradas, ventana_usuarios, rol_var, estado_var
-    
-    print("🚀 Iniciando ventana de gestión de usuarios...")
-    
+
+    print("Iniciando ventana de gestión de usuarios...")
+
     # Inicializar sistema de usuarios
     inicializar_sistema_usuarios()
-    
-    # Crear ventana principal
-    ventana_usuarios = tk.Tk()
-    ventana_usuarios.title("👥 Gestión de Usuarios - VmPOS")
-    ventana_usuarios.geometry("1200x750")
-    ventana_usuarios.resizable(False, False)
-    ventana_usuarios.configure(bg="#FFE4F1")
 
-    # Centrar ventana
-    ventana_usuarios.update_idletasks()
-    x = (ventana_usuarios.winfo_screenwidth() // 2) - 600
-    y = (ventana_usuarios.winfo_screenheight() // 2) - 375
-    ventana_usuarios.geometry(f"1200x750+{x}+{y}")
+    if parent is not None:
+        ventana_usuarios = tk.Toplevel(parent)
+        try:
+            ventana_usuarios.transient(parent)
+        except tk.TclError:
+            pass
+    else:
+        ventana_usuarios = tk.Tk()
+    ventana_usuarios.title("Gestión de Usuarios - VmPOS")
+    if parent is not None:
+        from navegacion_ventanas import instalar_barra_volver
+        instalar_barra_volver(ventana_usuarios, parent)
+    else:
+        from layout_responsive import configurar_ventana_modulo
+        configurar_ventana_modulo(ventana_usuarios, min_w=800, min_h=560, ratio_w=0.9, ratio_h=0.86)
+    ventana_usuarios.resizable(True, True)
+    ventana_usuarios.configure(bg=T.BG_APP)
 
-    # Configurar estilos
+    cuerpo = crear_cuerpo_modulo_scroll(ventana_usuarios, bg=T.BG_APP)
+
     style = ttk.Style()
-    style.theme_use('clam')
-    style.configure('Feminine.TLabel', background='#FFE4F1', foreground='#C71585', font=('Segoe UI', 10))
-    style.configure('Header.TLabel', background='#FF1493', foreground='white', font=('Segoe UI', 16, 'bold'))
-    style.configure('Feminine.TButton', background='#FF69B4', foreground='white', font=('Segoe UI', 10, 'bold'), relief="flat")
-    
-    # Estilo para la tabla
-    style.configure("Treeview",
-                    background="#FADDEE",
-                    foreground="#333",
-                    rowheight=25,
-                    fieldbackground="#FADDEE")
-    style.map('Treeview', background=[('selected', '#fd79a8')], foreground=[('selected', 'white')])
-    style.configure("Treeview.Heading",
-                    font=("Segoe UI", 10, "bold"),
-                    background="#e84393",
-                    foreground="white",
-                    relief="flat")
-    style.map("Treeview.Heading", background=[('active', '#e84393')])
+    style_ttk_treeview_pos(style, T.BG_APP)
 
-    # 🌸 Header principal
-    header_frame = tk.Frame(ventana_usuarios, bg="#FF1493", height=80)
-    header_frame.pack(fill="x")
+    header_frame = tk.Frame(cuerpo, bg=T.POS_HEADER, height=76)
+    header_frame.pack(fill=tk.X)
     header_frame.pack_propagate(False)
+    hl = tk.Frame(header_frame, bg=T.POS_HEADER)
+    hl.pack(side=tk.LEFT, fill=tk.Y, padx=20, pady=(12, 14))
+    tk.Label(hl, text="Usuarios del sistema", font=F_TITLE, bg=T.POS_HEADER, fg=T.WHITE).pack(anchor="w")
+    tk.Label(
+        hl,
+        text="Cree cuentas, asigne roles y active o desactive el acceso. La contraseña solo se actualiza si escribe una nueva.",
+        font=F_SMALL,
+        bg=T.POS_HEADER,
+        fg=T.HEADER_TEXT_DIM,
+        wraplength=820,
+        justify="left",
+    ).pack(anchor="w", pady=(4, 0))
 
-    tk.Label(header_frame, text="👥 Gestión de Usuarios del Sistema",
-             font=("Segoe UI", 20, "bold"), bg="#FF1493", fg="white").pack(pady=15)
+    main_frame = tk.Frame(cuerpo, bg=T.BG_APP)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
+    main_frame.grid_rowconfigure(1, weight=1)
+    main_frame.grid_columnconfigure(0, weight=1)
 
-    # Contenedor principal
-    main_frame = tk.Frame(ventana_usuarios, bg="#FFE4F1")
-    main_frame.pack(fill="both", expand=True, padx=20, pady=10)
-
-    # Formulario para usuarios
-    form_frame = tk.LabelFrame(main_frame, text="✨ Nuevo/Editar Usuario", font=("Segoe UI", 12, "bold"),
-                               bg="#FFDDEE", fg="#C71585", padx=15, pady=15, relief="flat")
-    form_frame.pack(fill="x", padx=10, pady=10)
+    form_frame = tk.Frame(main_frame, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    form_frame.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 10))
+    tk.Frame(form_frame, bg=T.ACCENT, height=3).pack(fill="x")
+    tk.Label(form_frame, text="Nuevo o editar usuario", font=F_HEAD, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=14, pady=(10, 4))
+    form_inner = tk.Frame(form_frame, bg=T.BG_CARD)
+    form_inner.pack(fill="x", padx=14, pady=(0, 14))
     
     # Crear grid para el formulario
     campos = ["Usuario", "Password"]
@@ -397,121 +400,123 @@ def iniciar_usuarios():
     rol_var = tk.StringVar(value="Seleccionar")
     estado_var = tk.StringVar(value="Seleccionar")
     
-    # Campo Usuario
-    tk.Label(form_frame, text="👤 Usuario:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFDDEE", fg="#C71585").grid(row=0, column=0, padx=5, pady=8, sticky="w")
-    entrada_usuario = tk.Entry(form_frame, font=("Segoe UI", 11), width=35, 
-                               bg="#FFFFFF", fg="#C71585", bd=1, relief="solid")
-    entrada_usuario.grid(row=0, column=1, padx=5, pady=8, sticky="w")
-    entradas['Usuario'] = entrada_usuario
-    
-    # Campo Contraseña
-    tk.Label(form_frame, text="🔒 Contraseña:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFDDEE", fg="#C71585").grid(row=1, column=0, padx=5, pady=8, sticky="w")
-    entrada_password = tk.Entry(form_frame, font=("Segoe UI", 11), width=35, 
-                                bg="#FFFFFF", fg="#C71585", bd=1, relief="solid", show="*")
-    entrada_password.grid(row=1, column=1, padx=5, pady=8, sticky="w")
-    entradas['Password'] = entrada_password
-    
-    # Campo Rol
-    tk.Label(form_frame, text="👑 Rol:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFDDEE", fg="#C71585").grid(row=2, column=0, padx=5, pady=8, sticky="w")
-    combo_rol = ttk.Combobox(form_frame, textvariable=rol_var, values=roles, 
-                             state="readonly", width=32, font=("Segoe UI", 11))
-    combo_rol.grid(row=2, column=1, padx=5, pady=8, sticky="w")
-    
-    # Campo Estado
-    tk.Label(form_frame, text="📊 Estado:", font=("Segoe UI", 11, "bold"), 
-             bg="#FFDDEE", fg="#C71585").grid(row=3, column=0, padx=5, pady=8, sticky="w")
-    combo_estado = ttk.Combobox(form_frame, textvariable=estado_var, values=estados, 
-                                state="readonly", width=32, font=("Segoe UI", 11))
-    combo_estado.grid(row=3, column=1, padx=5, pady=8, sticky="w")
-    
-    # Botones de acción
-    botones_frame = tk.Frame(form_frame, bg="#FFDDEE")
-    botones_frame.grid(row=4, column=0, columnspan=2, pady=15)
-    
-    btn_guardar = tk.Button(botones_frame, text="💾 Guardar Usuario", command=guardar_usuario, 
-                            bg="#FF69B4", fg="white", font=("Segoe UI", 11, "bold"), 
-                            relief="flat", padx=15, pady=8, cursor="hand2")
-    btn_guardar.pack(side="left", padx=5)
-    
-    btn_eliminar = tk.Button(botones_frame, text="🗑️ Eliminar", command=eliminar_usuario, 
-                             bg="#ff4d4d", fg="white", font=("Segoe UI", 11, "bold"), 
-                             relief="flat", padx=15, pady=8, cursor="hand2")
-    btn_eliminar.pack(side="left", padx=5)
-    
-    btn_limpiar = tk.Button(botones_frame, text="🧹 Limpiar", command=limpiar_campos, 
-                            bg="#3399ff", fg="white", font=("Segoe UI", 11, "bold"), 
-                            relief="flat", padx=15, pady=8, cursor="hand2")
-    btn_limpiar.pack(side="left", padx=5)
+    tk.Label(form_inner, text="Usuario", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(row=0, column=0, padx=(0, 10), pady=6, sticky="w")
+    entrada_usuario = tk.Entry(
+        form_inner, font=F_BODY, width=36, relief="flat", bd=0,
+        highlightthickness=1, highlightbackground=T.INPUT_BORDER,
+    )
+    entrada_usuario.grid(row=0, column=1, padx=0, pady=6, sticky="ew", ipady=4)
+    entradas["Usuario"] = entrada_usuario
 
-    btn_login = tk.Button(botones_frame, text="🔑 Probar Login", command=probar_login, 
-                          bg="#8B008B", fg="white", font=("Segoe UI", 11, "bold"), 
-                          relief="flat", padx=15, pady=8, cursor="hand2")
-    btn_login.pack(side="left", padx=5)
-    
-    btn_refrescar = tk.Button(botones_frame, text="🔄 Refrescar", command=refrescar_tabla, 
-                              bg="#17a2b8", fg="white", font=("Segoe UI", 11, "bold"), 
-                              relief="flat", padx=15, pady=8, cursor="hand2")
-    btn_refrescar.pack(side="left", padx=5)
+    tk.Label(form_inner, text="Contraseña", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(row=1, column=0, padx=(0, 10), pady=6, sticky="w")
+    entrada_password = tk.Entry(
+        form_inner, font=F_BODY, width=36, relief="flat", bd=0, show="*",
+        highlightthickness=1, highlightbackground=T.INPUT_BORDER,
+    )
+    entrada_password.grid(row=1, column=1, padx=0, pady=6, sticky="ew", ipady=4)
+    entradas["Password"] = entrada_password
 
-    # Marco de la tabla de usuarios
-    tabla_frame = tk.LabelFrame(main_frame, text="📋 Lista de Usuarios en Base de Datos", 
-                                font=("Segoe UI", 12, "bold"),
-                                bg="#FFE4F1", fg="#C71585", padx=15, pady=15, relief="flat")
-    tabla_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    tk.Label(form_inner, text="Rol", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(row=2, column=0, padx=(0, 10), pady=6, sticky="w")
+    combo_rol = ttk.Combobox(form_inner, textvariable=rol_var, values=roles, state="readonly", width=34, font=F_BODY)
+    combo_rol.grid(row=2, column=1, padx=0, pady=6, sticky="w")
 
-    # Crear la tabla (Treeview)
+    tk.Label(form_inner, text="Estado", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).grid(row=3, column=0, padx=(0, 10), pady=6, sticky="w")
+    combo_estado = ttk.Combobox(form_inner, textvariable=estado_var, values=estados, state="readonly", width=34, font=F_BODY)
+    combo_estado.grid(row=3, column=1, padx=0, pady=6, sticky="w")
+    form_inner.grid_columnconfigure(1, weight=1)
+
+    botones_frame = tk.Frame(form_inner, bg=T.BG_CARD)
+    botones_frame.grid(row=4, column=0, columnspan=2, pady=(12, 0), sticky="w")
+
+    btn_guardar = tk.Button(
+        botones_frame, text="Guardar", command=guardar_usuario,
+        bg=T.STAT_3, fg=T.WHITE, font=F_BODY_B, relief="flat", padx=14, pady=8, cursor="hand2",
+        activebackground=T.POS_BTN_GO_HOVER, activeforeground=T.WHITE,
+    )
+    btn_guardar.pack(side="left", padx=(0, 6))
+
+    btn_eliminar = tk.Button(
+        botones_frame, text="Eliminar", command=eliminar_usuario,
+        bg=T.DANGER, fg=T.WHITE, font=F_BODY_B, relief="flat", padx=14, pady=8, cursor="hand2",
+        activebackground="#b91c1c", activeforeground=T.WHITE,
+    )
+    btn_eliminar.pack(side="left", padx=6)
+
+    btn_limpiar = tk.Button(
+        botones_frame, text="Limpiar", command=limpiar_campos,
+        bg=T.POS_BTN_ALT, fg=T.WHITE, font=F_BODY_B, relief="flat", padx=14, pady=8, cursor="hand2",
+        activebackground=T.TEXT_MUTED, activeforeground=T.WHITE,
+    )
+    btn_limpiar.pack(side="left", padx=6)
+
+    btn_login = tk.Button(
+        botones_frame, text="Probar acceso", command=probar_login,
+        bg=T.STAT_2, fg=T.WHITE, font=F_BODY_B, relief="flat", padx=14, pady=8, cursor="hand2",
+        activebackground="#7c3aed", activeforeground=T.WHITE,
+    )
+    btn_login.pack(side="left", padx=6)
+
+    btn_refrescar = tk.Button(
+        botones_frame, text="Refrescar tabla", command=refrescar_tabla,
+        bg=T.STAT_1, fg=T.WHITE, font=F_BODY_B, relief="flat", padx=14, pady=8, cursor="hand2",
+        activebackground="#0284c7", activeforeground=T.WHITE,
+    )
+    btn_refrescar.pack(side="left", padx=6)
+
+    tabla_frame = tk.Frame(main_frame, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    tabla_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+    tk.Frame(tabla_frame, bg=T.POS_HEADER, height=3).pack(fill="x")
+    tk.Label(tabla_frame, text="Usuarios registrados", font=F_HEAD, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w", padx=14, pady=(10, 6))
+    tabla_wrap = tk.Frame(tabla_frame, bg=T.BG_CARD)
+    tabla_wrap.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
     columnas = ("ID", "Usuario", "Rol", "Estado", "Último Acceso", "Fecha Registro")
-    tabla = ttk.Treeview(tabla_frame, columns=columnas, show="headings", height=15)
+    tabla = ttk.Treeview(tabla_wrap, columns=columnas, show="headings", height=14)
     
     # Configurar columnas
     anchos_columnas = {"ID": 60, "Usuario": 150, "Rol": 120, "Estado": 100, "Último Acceso": 150, "Fecha Registro": 150}
     
     for col in columnas:
         tabla.heading(col, text=col)
-        tabla.column(col, width=anchos_columnas.get(col, 120), anchor="center")
+        tabla.column(col, width=anchos_columnas.get(col, 120), anchor="center", stretch=True, minwidth=50)
     
-    # Scrollbar para la tabla
-    scrollbar = ttk.Scrollbar(tabla_frame, orient="vertical", command=tabla.yview)
+    scrollbar = ttk.Scrollbar(tabla_wrap, orient="vertical", command=tabla.yview)
     tabla.configure(yscrollcommand=scrollbar.set)
-    
-    # Empaquetar tabla y scrollbar
-    tabla.pack(side="left", fill="both", expand=True, padx=(0, 5), pady=5)
-    scrollbar.pack(side="right", fill="y", pady=5)
+
+    tabla.pack(side="left", fill="both", expand=True, padx=(0, 4), pady=4)
+    scrollbar.pack(side="right", fill="y", pady=4)
     
     # Vincular evento de selección
     tabla.bind("<<TreeviewSelect>>", seleccionar_usuario)
 
-    # Información sobre la tabla
-    info_frame = tk.Frame(tabla_frame, bg="#FFE4F1")
-    info_frame.pack(fill="x", pady=(5, 0))
-    
-    tk.Label(info_frame, text="💡 Selecciona un usuario de la tabla para editar sus datos", 
-             font=("Segoe UI", 10, "italic"), bg="#FFE4F1", fg="#666666").pack()
+    info_frame = tk.Frame(tabla_frame, bg=T.BG_CARD)
+    info_frame.pack(fill="x", padx=14, pady=(0, 10))
 
-    # 📊 Footer con información del sistema
-    footer = tk.Frame(ventana_usuarios, bg="#e84393", height=60)
-    footer.pack(fill="x", side="bottom")
+    tk.Label(
+        info_frame,
+        text="Seleccione una fila para cargar los datos en el formulario superior.",
+        font=F_SMALL,
+        bg=T.BG_CARD,
+        fg=T.TEXT_MUTED,
+    ).pack(anchor="w")
+
+    footer = tk.Frame(cuerpo, bg=T.FOOTER, height=48)
+    footer.pack(fill=tk.X)
     footer.pack_propagate(False)
 
-    footer_left = tk.Frame(footer, bg="#e84393")
-    footer_left.pack(side="left", padx=20, pady=15)
-
-    footer_right = tk.Frame(footer, bg="#e84393")
-    footer_right.pack(side="right", padx=20, pady=15)
-
-    tk.Label(footer_left, text="📍 Puerto Colombia • 📞 +573215545788",
-             font=("Segoe UI", 10), bg="#e84393", fg="white").pack()
-
-    # Contador de usuarios
     usuarios_count = len(obtener_usuarios())
-    tk.Label(footer_right, text=f"✨ VmPOS v3.1.0 • {usuarios_count} usuarios registrados 💖",
-             font=("Segoe UI", 10), bg="#e84393", fg="#ffd3e8").pack()
+    tk.Label(
+        footer,
+        text=f"VmPOS v3.1.0 · {usuarios_count} usuario(s) · Puerto Colombia",
+        font=F_SMALL,
+        bg=T.FOOTER,
+        fg=T.HEADER_TEXT_DIM,
+    ).pack(expand=True, pady=14)
 
     # Cargar datos iniciales en la tabla
     actualizar_tabla()
+
+    modulo_scroll_finalizar(cuerpo)
     
     # Focus inicial en el campo usuario
     entradas['Usuario'].focus()
@@ -521,8 +526,8 @@ def iniciar_usuarios():
     ventana_usuarios.bind('<Escape>', lambda e: limpiar_campos())
     ventana_usuarios.bind('<Control-s>', lambda e: guardar_usuario())
     
-    print("✅ Ventana de gestión de usuarios iniciada correctamente.")
-    ventana_usuarios.mainloop()
+    if parent is None:
+        ventana_usuarios.mainloop()
 
 if __name__ == "__main__":
     iniciar_usuarios()

@@ -1,0 +1,7 @@
+{
+  "remote_check_enabled": false,
+  "server_url": "http://127.0.0.1:5050",
+  "license_key": "VmPOS-DEMO-001",
+  "offline_grace_hours": 72,
+  "last_ok_unix": 0
+}

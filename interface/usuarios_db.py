@@ -10,13 +10,7 @@ import hashlib
 import os
 from datetime import datetime
 
-# Ruta de la base de datos
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_DIR = os.path.join(BASE_DIR, '..', 'database')
-DATABASE_PATH = os.path.join(DATABASE_DIR, 'usuarios.db')
-
-# Crear directorio de base de datos si no existe
-os.makedirs(DATABASE_DIR, exist_ok=True)
+from paths import usuarios_db_path
 
 # Módulos disponibles en el sistema
 MODULOS_DISPONIBLES = [
@@ -38,7 +32,7 @@ def crear_tablas_iniciales():
     Crea las tablas necesarias en la base de datos si no existen.
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         # Crear tabla de usuarios
@@ -89,7 +83,7 @@ def insertar_usuario(usuario, password, rol, estado="Activo"):
         bool: True si se insertó correctamente, False si ya existe
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         # Verificar si el usuario ya existe
@@ -123,7 +117,7 @@ def obtener_usuarios():
         list: Lista de diccionarios con información de usuarios
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         cursor.execute('''
@@ -165,7 +159,7 @@ def actualizar_usuario_db(id_usuario, usuario=None, rol=None, estado=None, passw
         bool: True si se actualizó correctamente, False en caso contrario
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         # Construir la consulta dinámicamente
@@ -219,7 +213,7 @@ def eliminar_usuario_db(id_usuario):
         bool: True si se eliminó correctamente, False en caso contrario
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         cursor.execute("DELETE FROM usuarios WHERE id = ?", (id_usuario,))
@@ -245,7 +239,7 @@ def obtener_usuario_por_credenciales(usuario, password):
         dict or None: Información del usuario si las credenciales son correctas, None en caso contrario
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         password_hash = hash_password(password)
@@ -296,7 +290,7 @@ def obtener_permisos_por_usuario(usuario_id):
         list: Lista de permisos del usuario
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         cursor.execute('''
@@ -314,30 +308,60 @@ def obtener_permisos_por_usuario(usuario_id):
         print(f"❌ Error al obtener permisos: {e}")
         return []
 
+def asegurar_cuenta_administrador(usuario="admin", password="admin123"):
+    """
+    Crea o restablece el usuario indicado como Administrador con la contraseña dada
+    (misma lógica que el login: hash SHA-256). Útil si olvidaste la clave o la BD
+    quedó inconsistente.
+    """
+    crear_tablas_iniciales()
+    conn = sqlite3.connect(usuarios_db_path())
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM usuarios WHERE usuario = ?", (usuario,))
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+    if row:
+        actualizar_usuario_db(row[0], password=password, rol="Administrador", estado="Activo")
+        return True
+    return insertar_usuario(usuario, password, "Administrador", "Activo")
+
+
 def inicializar_admin_default():
     """
     Crea un usuario administrador por defecto si no existe ningún administrador.
+    Además, si no existe el usuario 'admin', lo crea aunque ya haya otro administrador.
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(usuarios_db_path())
         cursor = conn.cursor()
         
         # Verificar si existe algún administrador
         cursor.execute("SELECT id FROM usuarios WHERE rol = 'Administrador'")
         if not cursor.fetchone():
-            # Crear administrador por defecto
             password_hash = hash_password("admin123")
             cursor.execute('''
                 INSERT INTO usuarios (usuario, password, rol, estado, fecha_registro, fecha_modificacion)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', ("admin", password_hash, "Administrador", "Activo", datetime.now(), datetime.now()))
             conn.commit()
-            print("✅ Usuario administrador por defecto creado: admin/admin123")
+            print("Usuario administrador por defecto creado: admin / admin123")
+        else:
+            cursor.execute("SELECT id FROM usuarios WHERE usuario = ?", ("admin",))
+            if not cursor.fetchone():
+                password_hash = hash_password("admin123")
+                cursor.execute('''
+                    INSERT INTO usuarios (usuario, password, rol, estado, fecha_registro, fecha_modificacion)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', ("admin", password_hash, "Administrador", "Activo", datetime.now(), datetime.now()))
+                conn.commit()
+                print("Usuario 'admin' agregado (ya habia otro administrador, pero faltaba 'admin')")
         
         conn.close()
         
     except Exception as e:
-        print(f"❌ Error al crear administrador por defecto: {e}")
+        print(f"Error al crear administrador por defecto: {e}")
 
 # Función para migrar usuarios existentes (si los tienes en otro formato)
 def migrar_usuarios_existentes():
@@ -359,11 +383,19 @@ def migrar_usuarios_existentes():
             "Activo"
         )
 
-# Ejecutar inicialización al importar el módulo
 if __name__ == "__main__":
-    print("🚀 Inicializando base de datos de usuarios...")
+    import argparse
+    p = argparse.ArgumentParser(description="Base de datos de usuarios VmPOS")
+    p.add_argument(
+        "--reset-admin",
+        action="store_true",
+        help="Fuerza usuario admin con contrasena admin123 (recuperar acceso)",
+    )
+    args = p.parse_args()
+    print("Inicializando base de datos de usuarios...")
     crear_tablas_iniciales()
     inicializar_admin_default()
-    # Descomenta la siguiente línea si quieres migrar los usuarios del sistema actual
-    # migrar_usuarios_existentes()
-    print("✅ Base de datos de usuarios lista.")
+    if args.reset_admin:
+        asegurar_cuenta_administrador("admin", "admin123")
+        print("Cuenta admin restablecida: usuario admin, contrasena admin123")
+    print("Listo:", usuarios_db_path())

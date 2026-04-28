@@ -3,14 +3,18 @@ from tkinter import messagebox, filedialog
 import os
 import shutil
 import sqlite3
-import sys
 from datetime import datetime
 
-# Configuración de rutas para PyInstaller
-if getattr(sys, 'frozen', False):
-    BASE_DIR = sys._MEIPASS
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths import ventas_db_path
+from layout_responsive import (
+    bind_reflow_grid_uniform,
+    bind_reflow_pack,
+    bind_reflow_pair_header_body,
+    centrar_ventana,
+    crear_cuerpo_modulo_scroll,
+    modulo_scroll_finalizar,
+)
+from ui_theme import T, F_TITLE, F_BODY, F_BODY_B, F_SMALL, F_STAT
 
 # Importación opcional de pandas
 try:
@@ -75,7 +79,7 @@ def restaurar_base_datos():
     Elimina todos los datos de todas las tablas en la base de datos ventas.db
     con verificaciones de seguridad mejoradas.
     """
-    db_path = "ventas.db"
+    db_path = ventas_db_path()
     
     # Verificar si existe la base de datos
     if not os.path.exists(db_path):
@@ -291,10 +295,10 @@ def mostrar_resultado_restauracion(tablas_resultado, total_eliminados, registros
     """
     resultado_window = tk.Toplevel()
     resultado_window.title("✅ Resultado de la Restauración")
-    resultado_window.geometry("700x500")
     resultado_window.configure(bg="#FFE4F1")
     resultado_window.resizable(True, True)
     resultado_window.grab_set()  # Modal
+    centrar_ventana(resultado_window, 700, 500)
     
     main_frame = tk.Frame(resultado_window, bg="#FFE4F1")
     main_frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -384,7 +388,7 @@ def crear_backup():
     Crea una copia de seguridad completa de la base de datos ventas.db
     con verificaciones mejoradas y opciones avanzadas.
     """
-    db_path = "ventas.db"
+    db_path = ventas_db_path()
     
     # Verificar si existe la base de datos
     if not os.path.exists(db_path):
@@ -441,16 +445,10 @@ def crear_backup():
         # Mostrar progreso (simulado)
         progress_window = tk.Toplevel()
         progress_window.title("💾 Creando Backup...")
-        progress_window.geometry("400x200")
         progress_window.configure(bg="#FFE4F1")
         progress_window.resizable(False, False)
         progress_window.grab_set()
-        
-        # Centrar ventana de progreso
-        progress_window.update_idletasks()
-        x = (progress_window.winfo_screenwidth() // 2) - 200
-        y = (progress_window.winfo_screenheight() // 2) - 100
-        progress_window.geometry(f"400x200+{x}+{y}")
+        centrar_ventana(progress_window, 400, 200)
         
         progress_frame = tk.Frame(progress_window, bg="#FFE4F1")
         progress_frame.pack(expand=True, fill="both", padx=30, pady=30)
@@ -518,16 +516,10 @@ def crear_backup():
         # Ventana de resultado personalizada
         resultado_window = tk.Toplevel()
         resultado_window.title(f"{icono_estado} Backup {estado}")
-        resultado_window.geometry("500x400")
         resultado_window.configure(bg="#FFE4F1")
         resultado_window.resizable(False, False)
         resultado_window.grab_set()
-        
-        # Centrar ventana
-        resultado_window.update_idletasks()
-        x = (resultado_window.winfo_screenwidth() // 2) - 250
-        y = (resultado_window.winfo_screenheight() // 2) - 200
-        resultado_window.geometry(f"500x400+{x}+{y}")
+        centrar_ventana(resultado_window, 500, 400)
         
         main_frame = tk.Frame(resultado_window, bg="#FFE4F1")
         main_frame.pack(fill="both", expand=True, padx=30, pady=30)
@@ -605,7 +597,7 @@ def diagnosticar_base_datos():
     """
     Muestra información detallada sobre la base de datos y sus tablas
     """
-    db_path = "ventas.db"
+    db_path = ventas_db_path()
     
     if not os.path.exists(db_path):
         messagebox.showerror("❌ Error", f"La base de datos '{db_path}' no existe en el directorio actual.")
@@ -683,8 +675,8 @@ def diagnosticar_base_datos():
         # Mostrar información en una ventana de texto scrollable
         info_window = tk.Toplevel()
         info_window.title("🔍 Diagnóstico Completo - Base de Datos")
-        info_window.geometry("700x500")
         info_window.configure(bg="#FFE4F1")
+        centrar_ventana(info_window, 700, 500)
         
         # Frame principal
         main_frame = tk.Frame(info_window, bg="#FFE4F1")
@@ -726,7 +718,7 @@ def exportar_datos():
     """
     Exporta las tablas de productos, ventas y clientes a un archivo Excel estructurado
     """
-    db_path = "ventas.db"
+    db_path = ventas_db_path()
     
     # Verificar si existe la base de datos
     if not os.path.exists(db_path):
@@ -917,202 +909,242 @@ def configurar_impresora():
 
 def crear_cuadro(padre, texto, icono, color, tipo):
     """
-    Creates a styled interactive square button for configuration options.
+    Tarjeta clicable para una acción de configuración (tema VmPOS).
     """
-    frame = tk.Frame(padre, width=320, height=160, bg=color, relief="raised", bd=3, cursor="hand2")
+    hover = {
+        "restaurar_db": "#ef4444",
+        "backup_db": "#059669",
+        "limpiar_logs": "#0284c7",
+        "actualizar_sistema": "#d97706",
+        "configurar_impresora": "#7c3aed",
+        "exportar_datos": "#1d4ed8",
+    }.get(tipo, color)
+
+    frame = tk.Frame(
+        padre,
+        width=300,
+        height=148,
+        bg=color,
+        highlightbackground=T.WHITE,
+        highlightthickness=1,
+        cursor="hand2",
+    )
     frame.pack_propagate(False)
 
-    # Internal container to center content
     content_frame = tk.Frame(frame, bg=color)
     content_frame.pack(expand=True, fill="both")
 
-    # Large icon
-    icon_label = tk.Label(content_frame, text=icono, font=("Segoe UI Emoji", 36), 
-                          bg=color, fg="white")
-    icon_label.pack(pady=(20, 10))
+    widgets_bind = [frame, content_frame]
 
-    # Main text
-    text_label = tk.Label(content_frame, text=texto, font=("Segoe UI", 12, "bold"), 
-                          bg=color, fg="white", wraplength=280, justify="center")
-    text_label.pack(pady=(0, 20))
+    if icono and str(icono).strip():
+        icon_label = tk.Label(content_frame, text=icono, font=("Segoe UI Emoji", 28), bg=color, fg=T.WHITE)
+        icon_label.pack(pady=(18, 6))
+        widgets_bind.append(icon_label)
+    else:
+        icon_label = None
 
-    # Hover effects
-    def on_enter(e):
-        frame.config(bg="#FF1493", relief="raised", bd=4)
-        content_frame.config(bg="#FF1493")
-        icon_label.config(bg="#FF1493")
-        text_label.config(bg="#FF1493")
+    text_label = tk.Label(
+        content_frame,
+        text=texto,
+        font=F_BODY_B,
+        bg=color,
+        fg=T.WHITE,
+        wraplength=260,
+        justify="center",
+    )
+    text_label.pack(pady=(0, 16))
+    widgets_bind.append(text_label)
 
-    def on_leave(e):
-        frame.config(bg=color, relief="raised", bd=3)
+    def on_enter(_e):
+        frame.config(bg=hover)
+        content_frame.config(bg=hover)
+        text_label.config(bg=hover)
+        if icon_label is not None:
+            icon_label.config(bg=hover)
+
+    def on_leave(_e):
+        frame.config(bg=color)
         content_frame.config(bg=color)
-        icon_label.config(bg=color)
         text_label.config(bg=color)
+        if icon_label is not None:
+            icon_label.config(bg=color)
 
-    def on_click(e):
-        # Click effect
-        frame.config(relief="sunken", bd=2)
-        frame.after(100, lambda: frame.config(relief="raised", bd=3))
+    def on_click(_e):
+        frame.config(highlightbackground=T.BORDER)
+        frame.after(120, lambda: frame.config(highlightbackground=T.WHITE))
         abrir_config(tipo)
 
-    # Bind events to all elements within the square
-    for widget in [frame, content_frame, icon_label, text_label]:
-        widget.bind("<Button-1>", on_click)
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
+    for w in widgets_bind:
+        w.bind("<Button-1>", on_click)
+        w.bind("<Enter>", on_enter)
+        w.bind("<Leave>", on_leave)
 
     return frame
 
-def iniciar_configuracion():
+def iniciar_configuracion(parent=None):
     """
-    Initializes and displays the main configuration window.
+    Inicializa y muestra la ventana de configuración.
     """
-    ventana = tk.Tk()
-    ventana.title("⚙️ Configuración - VmPOS")
-    ventana.geometry("1100x700")
-    ventana.configure(bg="#FFE4F1")
-    ventana.resizable(False, False)
-    
-    # Center window
-    ventana.update_idletasks()
-    x = (ventana.winfo_screenwidth() // 2) - (550)
-    y = (ventana.winfo_screenheight() // 2) - (350)
-    ventana.geometry(f"1100x700+{x}+{y}")
+    if parent is not None:
+        ventana = tk.Toplevel(parent)
+        try:
+            ventana.transient(parent)
+        except tk.TclError:
+            pass
+    else:
+        ventana = tk.Tk()
+    ventana.title("Configuración - VmPOS")
+    if parent is not None:
+        from navegacion_ventanas import instalar_barra_volver
+        instalar_barra_volver(ventana, parent)
+    else:
+        from layout_responsive import configurar_ventana_modulo
+        configurar_ventana_modulo(ventana, min_w=900, min_h=560, ratio_w=0.9, ratio_h=0.86)
+    ventana.resizable(True, True)
+    ventana.configure(bg=T.BG_APP)
 
-    # 🌸 Header principal con gradiente
-    header_frame = tk.Frame(ventana, bg="#FF1493", height=100)
+    cuerpo = crear_cuerpo_modulo_scroll(ventana, bg=T.BG_APP)
+
+    header_frame = tk.Frame(cuerpo, bg=T.POS_HEADER, height=76)
     header_frame.pack(fill="x")
     header_frame.pack_propagate(False)
 
-    # Header content
-    header_content = tk.Frame(header_frame, bg="#FF1493")
-    header_content.pack(expand=True, fill="both")
+    hl = tk.Frame(header_frame, bg=T.POS_HEADER)
+    hl.pack(side=tk.LEFT, fill=tk.Y, padx=20, pady=(14, 16))
+    tk.Label(hl, text="Configuración del sistema", font=F_TITLE, bg=T.POS_HEADER, fg=T.WHITE).pack(anchor="w")
+    tk.Label(
+        hl,
+        text="Copias de seguridad, mantenimiento de datos y herramientas administrativas.",
+        font=F_SMALL,
+        bg=T.POS_HEADER,
+        fg=T.HEADER_TEXT_DIM,
+        wraplength=820,
+        justify="left",
+    ).pack(anchor="w", pady=(4, 0))
 
-    title_container = tk.Frame(header_content, bg="#FF1493")
-    title_container.pack(expand=True)
+    main_panel = tk.Frame(cuerpo, bg=T.BG_APP)
+    main_panel.pack(fill="both", expand=True, pady=16, padx=20)
 
-    tk.Label(title_container, text="⚙️", font=("Segoe UI Emoji", 40), 
-             bg="#FF1493", fg="white").pack(side="left", pady=25, padx=(50, 15))
-    tk.Label(title_container, text="CONFIGURACIÓN DEL SISTEMA", font=("Segoe UI", 22, "bold"), 
-             bg="#FF1493", fg="white").pack(side="left", pady=30)
-    tk.Label(title_container, text="✨", font=("Segoe UI Emoji", 40), 
-             bg="#FF1493", fg="white").pack(side="left", pady=25, padx=(15, 50))
+    info_frame = tk.Frame(main_panel, bg=T.BG_CARD, highlightbackground=T.BORDER, highlightthickness=1)
+    info_frame.pack(fill="x", pady=(0, 16))
+    tk.Frame(info_frame, bg=T.ACCENT, height=3).pack(fill="x")
 
-    # 💖 Subtitle
-    subtitle_frame = tk.Frame(ventana, bg="#FFDDEE", height=60)
-    subtitle_frame.pack(fill="x")
-    subtitle_frame.pack_propagate(False)
+    info_content = tk.Frame(info_frame, bg=T.BG_CARD)
+    info_content.pack(expand=True, fill="both", padx=20, pady=16)
 
-    tk.Label(subtitle_frame, text="🌸 Personaliza y mantén tu sistema siempre actualizado 🌸", 
-             font=("Segoe UI", 14), bg="#FFDDEE", fg="#C71585").pack(expand=True)
+    col1 = tk.Frame(info_content, bg=T.BG_CARD)
+    col2 = tk.Frame(info_content, bg=T.BG_CARD)
+    col3 = tk.Frame(info_content, bg=T.BG_CARD)
 
-    # 🎀 Main configuration panel
-    main_panel = tk.Frame(ventana, bg="#FFE4F1")
-    main_panel.pack(fill="both", expand=True, pady=30, padx=40)
+    tk.Label(col1, text="Sistema", font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED).pack(anchor="w")
+    tk.Label(col1, text="VmPOS v3.1.0", font=F_STAT, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w")
 
-    # 📊 System information panel
-    info_frame = tk.Frame(main_panel, bg="#FFC0CB", relief="raised", bd=2, height=100)
-    info_frame.pack(fill="x", pady=(0, 30))
-    info_frame.pack_propagate(False)
+    tk.Label(col2, text="Última revisión", font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED).pack(anchor="w")
+    tk.Label(col2, text="01/08/2025", font=F_BODY_B, bg=T.BG_CARD, fg=T.TEXT).pack(anchor="w")
 
-    info_content = tk.Frame(info_frame, bg="#FFC0CB")
-    info_content.pack(expand=True, fill="both", padx=30, pady=20)
+    tk.Label(col3, text="Base de datos", font=F_SMALL, bg=T.BG_CARD, fg=T.TEXT_MUTED).pack(anchor="w")
+    tk.Label(col3, text="Conectada", font=F_BODY_B, bg=T.BG_CARD, fg=T.STAT_3).pack(anchor="w")
 
-    # System information in columns
-    col1 = tk.Frame(info_content, bg="#FFC0CB")
-    col1.pack(side="left", fill="both", expand=True)
-
-    col2 = tk.Frame(info_content, bg="#FFC0CB")
-    col2.pack(side="left", fill="both", expand=True)
-
-    col3 = tk.Frame(info_content, bg="#FFC0CB")
-    col3.pack(side="left", fill="both", expand=True)
-
-    # System information labels
-    tk.Label(col1, text="💻 Sistema", font=("Segoe UI", 10, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack()
-    tk.Label(col1, text="VmPOS v3.1.0", font=("Segoe UI", 12), 
-             bg="#FFC0CB", fg="#FF1493").pack()
-
-    tk.Label(col2, text="📅 Última Actualización", font=("Segoe UI", 10, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack()
-    tk.Label(col2, text="01/08/2025", font=("Segoe UI", 12), 
-             bg="#FFC0CB", fg="#FF1493").pack()
-
-    tk.Label(col3, text="💾 Base de Datos", font=("Segoe UI", 10, "bold"), 
-             bg="#FFC0CB", fg="#8B0054").pack()
-    tk.Label(col3, text="Conectada ✅", font=("Segoe UI", 12), 
-             bg="#FFC0CB", fg="#32CD32").pack()
-
-    # 🎨 Configuration options panel in a grid-like fashion
-    options_container = tk.Frame(main_panel, bg="#FFE4F1")
+    bind_reflow_pack(
+        info_content,
+        [
+            (col1, {"side": tk.LEFT, "fill": tk.BOTH, "expand": True}, {"fill": tk.X, "pady": 6}),
+            (col2, {"side": tk.LEFT, "fill": tk.BOTH, "expand": True}, {"fill": tk.X, "pady": 6}),
+            (col3, {"side": tk.LEFT, "fill": tk.BOTH, "expand": True}, {"fill": tk.X, "pady": 6}),
+        ],
+        umbral=640,
+        debounce_ms=80,
+    )
+    # 🎨 Cuadros de opciones (rejilla 3 cols / columna única si la ventana es estrecha)
+    options_container = tk.Frame(main_panel, bg=T.BG_APP)
     options_container.pack(fill="both", expand=True)
 
-    # Options organized in rows
-    opciones = [
-        # First row
-        [
-            ("🔄 Restaurar\nBase de Datos", "🔄", "#FF6B6B", "restaurar_db"),
-            ("💾 Crear Copia\nde Seguridad", "💾", "#4ECDC4", "backup_db"),
-            ("🧹 Limpiar\nArchivos Log", "🧹", "#45B7D1", "limpiar_logs")
-        ],
-        # Second row
-        [
-            ("🚀 Actualizar\nSistema", "🚀", "#96CEB4", "actualizar_sistema"),
-            ("🖨️ Configurar\nImpresora", "🖨️", "#FECA57", "configurar_impresora"),
-            ("📊 Exportar\nDatos", "📊", "#FF9FF3", "exportar_datos")
-        ]
+    opciones_cfg = [
+        ("Restaurar\nbase de datos", "", "#b91c1c", "restaurar_db"),
+        ("Copia de\nseguridad", "", "#047857", "backup_db"),
+        ("Limpiar\narchivos log", "", "#0369a1", "limpiar_logs"),
+        ("Actualizar\nsistema", "", "#c2410c", "actualizar_sistema"),
+        ("Configurar\nimpresora", "", "#6d28d9", "configurar_impresora"),
+        ("Exportar\ndatos", "", "#1d4ed8", "exportar_datos"),
     ]
 
-    for fila_opciones in opciones:
-        fila_frame = tk.Frame(options_container, bg="#FFE4F1")
-        fila_frame.pack(pady=20)
-        
-        for texto, icono, color, tipo in fila_opciones:
-            cuadro = crear_cuadro(fila_frame, texto, icono, color, tipo)
-            cuadro.pack(side="left", padx=25)
+    cuadros_cfg = []
+    for texto, icono, color, tipo in opciones_cfg:
+        cuadros_cfg.append(crear_cuadro(options_container, texto, icono, color, tipo))
 
-    # 🌟 Quick actions panel
-    quick_actions_frame = tk.Frame(ventana, bg="#FF1493", height=80)
-    quick_actions_frame.pack(fill="x")
-    quick_actions_frame.pack_propagate(False)
+    bind_reflow_grid_uniform(options_container, cuadros_cfg, columnas_cuando_anchas=3, umbral=760, pad_exterior=22)
 
-    quick_content = tk.Frame(quick_actions_frame, bg="#FF1493")
-    quick_content.pack(expand=True, fill="both")
+    quick_actions_frame = tk.Frame(cuerpo, bg=T.BG_SUBTLE, highlightbackground=T.BORDER, highlightthickness=1)
+    quick_actions_frame.pack(fill="x", padx=20, pady=(0, 12))
 
-    tk.Label(quick_content, text="⚡ ACCIONES RÁPIDAS", font=("Segoe UI", 12, "bold"), 
-             bg="#FF1493", fg="white").pack(side="left", padx=30, pady=25)
+    quick_content = tk.Frame(quick_actions_frame, bg=T.BG_SUBTLE)
+    quick_content.pack(expand=True, fill="both", padx=12, pady=10)
 
-    # Quick access buttons
+    qa_title = tk.Label(
+        quick_content,
+        text="Accesos rápidos",
+        font=F_BODY_B,
+        bg=T.BG_SUBTLE,
+        fg=T.TEXT,
+    )
+    q_buttons_wrap = tk.Frame(quick_content, bg=T.BG_SUBTLE)
+
     quick_buttons = [
-        ("🔧 Diagnóstico", diagnosticar_base_datos),
-        ("📋 Logs del Sistema", lambda: messagebox.showinfo("📋", "Mostrando logs recientes...")),
-        ("🌐 Verificar Conexión", lambda: messagebox.showinfo("🌐", "Conexión a internet: OK ✅")),
-        ("🎨 Cambiar Tema", lambda: messagebox.showinfo("🎨", "Tema femenino activo 💖"))
+        ("Diagnóstico de base de datos", diagnosticar_base_datos),
+        ("Ver logs del sistema", lambda: messagebox.showinfo("Logs", "Mostrando logs recientes...", parent=ventana)),
+        ("Verificar conexión", lambda: messagebox.showinfo("Conexión", "Conexión a internet: OK.", parent=ventana)),
+        ("Ayuda del tema", lambda: messagebox.showinfo("Tema", "La aplicación usa el tema visual unificado VmPOS.", parent=ventana)),
     ]
 
-    quick_buttons_frame = tk.Frame(quick_content, bg="#FF1493")
-    quick_buttons_frame.pack(side="right", padx=30, pady=15)
+    cfg_btns_quick = []
+
+    def make_quick_hover(button, base_bg, hover_bg):
+        def on_enter(_e):
+            button.config(bg=hover_bg, fg=T.WHITE)
+
+        def on_leave(_e):
+            button.config(bg=base_bg, fg=T.TEXT)
+
+        return on_enter, on_leave
 
     for texto, comando in quick_buttons:
-        btn = tk.Button(quick_buttons_frame, text=texto, command=comando,
-                        bg="#FFDDEE", fg="#C71585", font=("Segoe UI", 9, "bold"),
-                        relief="flat", padx=12, pady=8, cursor="hand2")
-        btn.pack(side="left", padx=5)
-
-        # Hover effects for quick buttons
-        def make_quick_hover(button):
-            def on_enter(e):
-                button.config(bg="#FF69B4", fg="white")
-            def on_leave(e):
-                button.config(bg="#FFDDEE", fg="#C71585")
-            return on_enter, on_leave
-
-        enter_fx, leave_fx = make_quick_hover(btn)
+        base_bg = T.BG_CARD
+        btn = tk.Button(
+            q_buttons_wrap,
+            text=texto,
+            command=comando,
+            bg=base_bg,
+            fg=T.TEXT,
+            font=F_BODY,
+            relief="flat",
+            padx=12,
+            pady=8,
+            cursor="hand2",
+            highlightthickness=1,
+            highlightbackground=T.BORDER,
+        )
+        btn.pack(side=tk.LEFT, padx=5)
+        cfg_btns_quick.append(btn)
+        enter_fx, leave_fx = make_quick_hover(btn, base_bg, T.POS_HEADER)
         btn.bind("<Enter>", enter_fx)
         btn.bind("<Leave>", leave_fx)
 
-    # 🎯 Keyboard events
+    bind_reflow_pair_header_body(quick_content, qa_title, q_buttons_wrap, umbral=700, debounce_ms=80)
+    bind_reflow_pack(
+        q_buttons_wrap,
+        [
+            (
+                cfg_btns_quick[i],
+                {"side": tk.LEFT, "padx": 5},
+                {"fill": tk.X, "padx": 4, "pady": 3},
+            )
+            for i in range(len(cfg_btns_quick))
+        ],
+        umbral=920,
+        debounce_ms=80,
+    )
+
+    # 🎯 Atajos de teclado
     def keyboard_shortcuts(event):
         if event.state & 4:   # Ctrl pressed
             key = event.keysym.lower()
@@ -1123,7 +1155,10 @@ def iniciar_configuracion():
 
     ventana.bind("<Key>", keyboard_shortcuts)
 
-    ventana.mainloop()
+    modulo_scroll_finalizar(cuerpo)
+
+    if parent is None:
+        ventana.mainloop()
 
 if __name__ == "__main__":
     iniciar_configuracion()
