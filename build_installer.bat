@@ -56,11 +56,20 @@ if not exist "dist\VmPOS\VmPOS.exe" (
 
 echo [3/3] Construyendo instalador Inno Setup...
 set "ISCC_EXE="
-if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
-if not defined ISCC_EXE if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" (
+  set "ISCC_EXE=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+)
+if not defined ISCC_EXE (
+  if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
+    set "ISCC_EXE=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+  )
+)
+rem Nota: no usar "if defined ProgramFiles(x86)" (rompe el parser de CMD).
 if not defined ISCC_EXE if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC_EXE=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
-if not defined ISCC_EXE for /f "delims=" %%I in ('where.exe ISCC.exe 2^>nul') do (
-  if not defined ISCC_EXE set "ISCC_EXE=%%~I"
+if not defined ISCC_EXE (
+  for /f "delims=" %%I in ('where.exe ISCC.exe 2^>nul') do (
+    if not defined ISCC_EXE set "ISCC_EXE=%%~I"
+  )
 )
 if not defined ISCC_EXE (
   echo No se encontro Inno Setup (ISCC.exe).

@@ -21,7 +21,9 @@ import uuid
 
 from paths import license_remote_config_path
 
-OFFLINE_GRACE_HOURS = 24.0
+# Ventana máxima sin internet antes de bloquear acceso.
+# Si pasan estas horas desde el último check remoto exitoso, se bloquea el programa.
+OFFLINE_GRACE_HOURS = 72.0
 _STATE_FILE = ".license_state"
 # Semilla local para firma anti-manipulación básica del estado offline.
 # Nota: no sustituye seguridad de servidor, pero evita bypass trivial por editar JSON.
@@ -97,9 +99,9 @@ def _load_last_ok_state(license_key: str) -> int | None:
         return None
 
 
-def _request_status(server_url: str, license_key: str, timeout: float = 12.0) -> tuple[bool, str | None]:
+def _request_status(server_url: str, license_key: str, timeout: float = 12.0) -> tuple[bool, str | None, dict]:
     """
-    Llama al servidor. Devuelve (ok, reason) donde reason es None si la licencia está activa;
+    Llama al servidor. Devuelve (ok, reason, payload) donde reason es None si la licencia está activa;
     si no, uno de: ``inactive``, ``not_found``, ``http_error``, ``network``.
     """
     base = server_url.rstrip("/")
@@ -111,21 +113,48 @@ def _request_status(server_url: str, license_key: str, timeout: float = 12.0) ->
             body = resp.read().decode("utf-8", errors="replace")
             data = json.loads(body)
             if bool(data.get("active")):
-                return True, None
-            return False, "inactive"
+                return True, None, data
+            return False, "inactive", data
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return False, "not_found"
+            return False, "not_found", {}
         try:
             body = e.read().decode("utf-8", errors="replace")
             data = json.loads(body)
             if not bool(data.get("active", False)):
-                return False, "inactive"
+                return False, "inactive", data
         except Exception:
             pass
-        return False, "http_error"
+        return False, "http_error", {}
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return False, "network"
+        return False, "network", {}
+
+
+def _warning_message_from_payload(payload: dict) -> str:
+    days = payload.get("days_remaining")
+    hours = payload.get("hours_remaining")
+    minutes = payload.get("minutes_remaining")
+    if days is None:
+        return ""
+    try:
+        days = int(days)
+    except Exception:
+        return ""
+    if days > 3:
+        return ""
+    if days >= 1:
+        return f"Solo tienes {days} día{'s' if days != 1 else ''} de licencia."
+    if days == 0:
+        try:
+            h = max(0, int(hours or 0))
+            m = max(0, int(minutes or 0))
+        except Exception:
+            h, m = 0, 0
+        return (
+            "Tu licencia vence hoy.\n"
+            f"Tiempo restante: {h:02d}:{m:02d} (horas:minutos)."
+        )
+    return ""
 
 
 def remote_license_screening() -> tuple[bool, str, str]:
@@ -164,7 +193,7 @@ def remote_license_screening() -> tuple[bool, str, str]:
     if not server_url or not license_key:
         return False, "Configuración de licencia", "Revise license_remote.json: faltan server_url o license_key."
 
-    ok, reason = _request_status(server_url, license_key)
+    ok, reason, payload = _request_status(server_url, license_key)
 
     if ok:
         now_ts = int(time.time())
@@ -177,6 +206,9 @@ def remote_license_screening() -> tuple[bool, str, str]:
             _save_last_ok_state(license_key, now_ts)
         except OSError:
             pass
+        warn = _warning_message_from_payload(payload)
+        if warn:
+            return True, "Licencia por vencer", warn
         return True, "", ""
 
     if reason in ("inactive", "not_found"):
@@ -193,7 +225,16 @@ def remote_license_screening() -> tuple[bool, str, str]:
     if isinstance(last_ok, int) and last_ok > 0:
         elapsed = time.time() - float(last_ok)
         if elapsed <= grace_h * 3600:
-            return True, "", ""
+            remaining_s = max(0, int((grace_h * 3600) - elapsed))
+            rem_h = remaining_s // 3600
+            rem_m = (remaining_s % 3600) // 60
+            return (
+                True,
+                "Modo offline",
+                "No se pudo conectar con el servidor de licencias.\n"
+                "El sistema seguirá funcionando temporalmente en modo offline.\n"
+                f"Tiempo de gracia restante: {rem_h:02d}:{rem_m:02d} (horas:minutos).",
+            )
 
     return (
         False,

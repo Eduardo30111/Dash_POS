@@ -170,6 +170,9 @@ class VmPOSDashboard(tk.Tk):
             "license_notice_message",
             "Tu licencia ha vencido. Si quieres renovarla, escríbenos por WhatsApp.",
         )
+        self.license_notice_level = str(
+            self.datos_usuario.get("license_notice_level", "")
+        ).strip().lower()
         self.license_notice_whatsapp = str(
             self.datos_usuario.get("license_notice_whatsapp", "3207716590")
         ).strip()
@@ -282,8 +285,14 @@ class VmPOSDashboard(tk.Tk):
             print(f"Error creando header: {e}")
 
     def _create_license_banner(self):
-        """Muestra aviso superior cuando la licencia está vencida/desactivada."""
-        if not self.license_limited:
+        """Muestra aviso superior de licencia (vencida, por vencer o modo offline)."""
+        show_warning = (
+            (not self.license_limited)
+            and bool((self.license_notice_title or "").strip())
+            and bool((self.license_notice_message or "").strip())
+            and self.license_notice_level in {"warning", "offline"}
+        )
+        if not self.license_limited and not show_warning:
             return
         try:
             fr = tk.Frame(self, bg=T.WARN, height=44)
@@ -300,24 +309,25 @@ class VmPOSDashboard(tk.Tk):
                 anchor="w",
             ).pack(side="left", padx=12, pady=8, fill="x", expand=True)
 
-            wa_num = "".join(ch for ch in self.license_notice_whatsapp if ch.isdigit())
-            if not wa_num.startswith("57"):
-                wa_num = f"57{wa_num}"
-            wa_msg = "Hola, quiero renovar mi licencia de VmPOS."
-            wa_url = f"https://wa.me/{wa_num}?text={wa_msg.replace(' ', '%20')}"
-            tk.Button(
-                fr,
-                text="Renovar por WhatsApp",
-                font=F_SMALL,
-                bg=T.ACCENT,
-                fg=T.WHITE,
-                bd=0,
-                padx=12,
-                pady=6,
-                relief="flat",
-                cursor="hand2",
-                command=lambda: webbrowser.open(wa_url),
-            ).pack(side="right", padx=10, pady=6)
+            if self.license_limited:
+                wa_num = "".join(ch for ch in self.license_notice_whatsapp if ch.isdigit())
+                if not wa_num.startswith("57"):
+                    wa_num = f"57{wa_num}"
+                wa_msg = "Hola, quiero renovar mi licencia de VmPOS."
+                wa_url = f"https://wa.me/{wa_num}?text={wa_msg.replace(' ', '%20')}"
+                tk.Button(
+                    fr,
+                    text="Renovar por WhatsApp",
+                    font=F_SMALL,
+                    bg=T.ACCENT,
+                    fg=T.WHITE,
+                    bd=0,
+                    padx=12,
+                    pady=6,
+                    relief="flat",
+                    cursor="hand2",
+                    command=lambda: webbrowser.open(wa_url),
+                ).pack(side="right", padx=10, pady=6)
         except Exception as e:
             print(f"Error creando banner de licencia: {e}")
 

@@ -282,6 +282,14 @@ def validar_usuario(event=None):
             else:
                 mostrar_alerta_bonita(tit_lr or "VmPOS", msg_lr, "error")
                 return
+        elif (tit_lr or "").strip() and (msg_lr or "").strip():
+            # Aviso preventivo/offline: mostrar popup y también banner persistente en el menú.
+            messagebox.showwarning(tit_lr, msg_lr)
+            if isinstance(datos_usuario, dict):
+                datos_usuario["license_notice_title"] = tit_lr
+                datos_usuario["license_notice_message"] = msg_lr
+                datos_usuario["license_notice_level"] = "warning"
+                datos_usuario["license_notice_whatsapp"] = "3207716590"
     except Exception as ex_lr:
         print(f"VmPOS: verificación remota omitida o error: {ex_lr}")
 
